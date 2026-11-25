@@ -1,0 +1,307 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfileCreate(data) {
+      return data.keys().hasOnly(['email', 'displayName', 'bio', 'photoUrl', 'credits', 'appearance', 'language', 'isPublicProfile', 'createdAt'])
+        && data.credits is int && data.credits == 5
+        && data.createdAt is timestamp
+        && (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 254))
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000))
+        && (!('appearance' in data) || data.appearance in ['Light', 'Dark', 'System Default'])
+        && (!('language' in data) || (data.language is string && data.language.size() <= 50))
+        && (!('isPublicProfile' in data) || data.isPublicProfile is bool);
+    }
+
+    function isValidUserProfileUpdate(data, existing) {
+      return data.diff(existing).affectedKeys().hasOnly(['displayName', 'photoUrl', 'bio', 'appearance', 'language', 'isPublicProfile'])
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000))
+        && (!('appearance' in data) || data.appearance in ['Light', 'Dark', 'System Default'])
+        && (!('isPublicProfile' in data) || data.isPublicProfile is bool)
+        && (!('language' in data) || (data.language is string && data.language.size() <= 50));
+    }
+
+    function isValidPublicProfile(data) {
+      return data.keys().hasOnly(['displayName', 'bio', 'photoUrl', 'isPublicProfile', 'updatedAt'])
+        && data.isPublicProfile is bool
+        && data.updatedAt is timestamp
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('bio' in data) || (data.bio is string && data.bio.size() <= 500))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000));
+    }
+
+    function isValidDemoSongCreate(data) {
+      return data.userId == request.auth.uid
+        && data.isDemo == true
+        && data.isPublic == false
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.prompt is string && data.prompt.size() <= 1000
+        && data.lyrics is string && data.lyrics.size() <= 10000
+        && data.genre is string && data.genre.size() <= 50
+        && (!('language' in data) || (data.language is string && data.language.size() <= 50))
+        && (!('mood' in data) || (data.mood is string && data.mood.size() <= 100))
+        && (!('tempo' in data) || (data.tempo is string && data.tempo.size() <= 50))
+        && (!('instruments' in data) || (data.instruments is list && data.instruments.size() <= 20))
+        && (!('vocalStyle' in data) || (data.vocalStyle is string && data.vocalStyle.size() <= 100))
+        && data.audioUrl is string && data.audioUrl.size() <= 1000
+        && data.isFavorite is bool
+        && data.isPinned is bool
+        && data.allowRemix is bool
+        && data.likeStatus is int && data.likeStatus == 0
+        && data.creatorName is string && data.creatorName.size() <= 100
+        && data.createdAt is timestamp;
+    }
+
+    function isValidBilingualMeta(data) {
+      return (!('sectionLanguages' in data) || (data.sectionLanguages is map && data.sectionLanguages.size() <= 12))
+        && (!('captionCues' in data) || (data.captionCues is list && data.captionCues.size() <= 100))
+        && (!('captionDisplayMode' in data) || data.captionDisplayMode in ['BOTH', 'ENGLISH_ONLY', 'TWI_ONLY']);
+    }
+
+    function isValidSlideshowMeta(data) {
+      return (!('aspectRatio' in data) || data.aspectRatio in ['16:9', '9:16', '1:1'])
+        && (!('captions' in data) || (data.captions is string && data.captions.size() <= 1000))
+        && (!('transitionStyle' in data) || (data.transitionStyle is string && data.transitionStyle.size() <= 50))
+        && (!('durationPerImageSec' in data) || (data.durationPerImageSec is int && data.durationPerImageSec >= 1 && data.durationPerImageSec <= 30))
+        && (!('photoCount' in data) || (data.photoCount is int && data.photoCount >= 0 && data.photoCount <= 30))
+        && (!('coverPhotoUri' in data) || (data.coverPhotoUri is string && data.coverPhotoUri.size() <= 1000))
+        && (!('photoUris' in data) || (data.photoUris is list && data.photoUris.size() <= 30))
+        && (!('localVideoPath' in data) || (data.localVideoPath is string && data.localVideoPath.size() <= 1000))
+        && isValidBilingualMeta(data);
+    }
+
+    function isValidAudioMixCreate(data) {
+      return data.userId == request.auth.uid
+        && data.isDemo is bool
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.language is string && data.language.size() > 0 && data.language.size() <= 50
+        && data.lyrics is string && data.lyrics.size() <= 10000
+        && data.tracks is list && data.tracks.size() <= 16
+        && data.totalDurationMs is int && data.totalDurationMs >= 0 && data.totalDurationMs <= 3600000
+        && data.localMp3Path is string && data.localMp3Path.size() <= 1000
+        && data.creatorName is string && data.creatorName.size() <= 100
+        && data.createdAt is timestamp
+        && isValidBilingualMeta(data)
+        && data.keys().hasOnly([
+          'userId', 'title', 'language', 'sectionLanguages', 'lyrics', 'captionCues',
+          'tracks', 'totalDurationMs', 'localMp3Path', 'isDemo', 'creatorName', 'createdAt'
+        ]);
+    }
+
+    function isValidAudioMixUpdate(data, existing) {
+      return data.userId == existing.userId
+        && data.diff(existing).affectedKeys().hasOnly([
+          'title', 'language', 'sectionLanguages', 'lyrics', 'captionCues',
+          'tracks', 'totalDurationMs', 'localMp3Path'
+        ])
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.language is string && data.language.size() > 0 && data.language.size() <= 50
+        && data.lyrics is string && data.lyrics.size() <= 10000
+        && data.tracks is list && data.tracks.size() <= 16
+        && data.totalDurationMs is int && data.totalDurationMs >= 0 && data.totalDurationMs <= 3600000
+        && data.localMp3Path is string && data.localMp3Path.size() <= 1000
+        && isValidBilingualMeta(data);
+    }
+
+    function isValidVideoCreate(data) {
+      return data.userId == request.auth.uid
+        && data.isDemo == true
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.prompt is string && data.prompt.size() <= 1000
+        && data.templateName is string && data.templateName.size() <= 100
+        && data.videoUrl is string && data.videoUrl.size() <= 1000
+        && data.creatorName is string && data.creatorName.size() <= 100
+        && data.createdAt is timestamp
+        && isValidSlideshowMeta(data);
+    }
+
+    function isValidMusicVideoCreate(data) {
+      return data.userId == request.auth.uid
+        && data.isDemo == true
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.songId is string && data.songId.size() <= 200
+        && data.videoId is string && data.videoId.size() <= 200
+        && data.bibleVerse is string && data.bibleVerse.size() <= 500
+        && data.videoUrl is string && data.videoUrl.size() <= 1000
+        && data.creatorName is string && data.creatorName.size() <= 100
+        && data.createdAt is timestamp
+        && isValidSlideshowMeta(data);
+    }
+
+    // 1. Private User Profile & Credits (strictly owner-only read; fixed initial demo credits; credits immutable from client)
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserProfileCreate(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserProfileUpdate(request.resource.data, resource.data);
+      allow delete: if false;
+    }
+
+    // 1b. Public Creator Profile (no email, no credits)
+    match /public_profiles/{userId} {
+      allow read: if isSignedIn() && (isOwner(userId) || resource.data.isPublicProfile == true);
+      allow create, update: if isOwner(userId) && isValidPublicProfile(request.resource.data);
+      allow delete: if false;
+    }
+
+    // 2. Songs
+    match /songs/{songId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.isPublic == true
+      );
+
+      allow create: if isSignedIn() && isValidDemoSongCreate(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'isFavorite', 'isPublic', 'likeStatus', 'isPinned', 'allowRemix'])
+                    && (request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100)
+                    && (request.resource.data.isFavorite is bool)
+                    && (request.resource.data.isPublic is bool)
+                    && (request.resource.data.isPinned is bool)
+                    && (request.resource.data.allowRemix is bool)
+                    && (request.resource.data.likeStatus is int && request.resource.data.likeStatus >= -1 && request.resource.data.likeStatus <= 1);
+    }
+
+    // 3. Playlists
+    match /playlists/{playlistId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100
+                    && request.resource.data.songIds is list && request.resource.data.songIds.size() <= 200
+                    && request.resource.data.createdAt is timestamp;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'songIds'])
+                    && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 100
+                    && request.resource.data.songIds is list && request.resource.data.songIds.size() <= 200;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // 4. Videos & Music Videos (Demo-only creation)
+    match /videos/{videoId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidVideoCreate(request.resource.data);
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /music_videos/{mvId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidMusicVideoCreate(request.resource.data);
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // 5. Lyrics
+    match /lyrics/{lyricId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.createdAt is timestamp
+                    && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100
+                    && request.resource.data.lyrics is string && request.resource.data.lyrics.size() > 0 && request.resource.data.lyrics.size() <= 10000
+                    && request.resource.data.topic is string && request.resource.data.topic.size() <= 200
+                    && request.resource.data.genre is string && request.resource.data.genre.size() <= 50
+                    && request.resource.data.mood is string && request.resource.data.mood.size() <= 100
+                    && (!('language' in request.resource.data) || (request.resource.data.language is string && request.resource.data.language.size() <= 50))
+                    && (!('scriptureReference' in request.resource.data) || (request.resource.data.scriptureReference is string && request.resource.data.scriptureReference.size() <= 200))
+                    && (!('userInstructions' in request.resource.data) || (request.resource.data.userInstructions is string && request.resource.data.userInstructions.size() <= 500))
+                    && (!('generationSource' in request.resource.data) || request.resource.data.generationSource in ['AI_GEMINI', 'DEMO'])
+                    && isValidBilingualMeta(request.resource.data)
+                    && request.resource.data.keys().hasOnly([
+                      'userId', 'title', 'lyrics', 'topic', 'genre', 'mood', 'language',
+                      'scriptureReference', 'userInstructions', 'generationSource',
+                      'sectionLanguages', 'captionCues', 'createdAt'
+                    ]);
+
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      'title', 'lyrics', 'topic', 'genre', 'mood', 'language',
+                      'scriptureReference', 'userInstructions', 'generationSource',
+                      'sectionLanguages', 'captionCues'
+                    ])
+                    && (request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 100)
+                    && (request.resource.data.lyrics is string && request.resource.data.lyrics.size() > 0 && request.resource.data.lyrics.size() <= 10000)
+                    && (request.resource.data.topic is string && request.resource.data.topic.size() <= 200)
+                    && (request.resource.data.genre is string && request.resource.data.genre.size() <= 50)
+                    && (request.resource.data.mood is string && request.resource.data.mood.size() <= 100)
+                    && (!('language' in request.resource.data) || (request.resource.data.language is string && request.resource.data.language.size() <= 50))
+                    && (!('scriptureReference' in request.resource.data) || (request.resource.data.scriptureReference is string && request.resource.data.scriptureReference.size() <= 200))
+                    && (!('userInstructions' in request.resource.data) || (request.resource.data.userInstructions is string && request.resource.data.userInstructions.size() <= 500))
+                    && (!('generationSource' in request.resource.data) || request.resource.data.generationSource in ['AI_GEMINI', 'DEMO'])
+                    && isValidBilingualMeta(request.resource.data);
+    }
+
+    // 5a. Multi-track Audio Mix Projects (owner-only CRUD)
+    match /audio_mixes/{mixId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidAudioMixCreate(request.resource.data);
+      allow update: if isSignedIn()
+                    && resource.data.userId == request.auth.uid
+                    && isValidAudioMixUpdate(request.resource.data, resource.data);
+    }
+
+    // 5b. Saved AI Idea Generator Templates & AI Ideas (strict owner-only persistence)
+    match /ideas/{ideaId} {
+      allow read, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if false;
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.isDemo is bool
+                    && request.resource.data.createdAt is timestamp
+                    && request.resource.data.category is string && request.resource.data.category.size() > 0 && request.resource.data.category.size() <= 80
+                    && request.resource.data.title is string && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 120
+                    && request.resource.data.summary is string && request.resource.data.summary.size() <= 1000
+                    && request.resource.data.topic is string && request.resource.data.topic.size() <= 200
+                    && request.resource.data.genre is string && request.resource.data.genre.size() <= 50
+                    && request.resource.data.mood is string && request.resource.data.mood.size() <= 100
+                    && request.resource.data.language is string && request.resource.data.language.size() <= 50
+                    && request.resource.data.tempo is string && request.resource.data.tempo.size() <= 50
+                    && request.resource.data.instruments is list && request.resource.data.instruments.size() <= 20
+                    && request.resource.data.vocalStyle is string && request.resource.data.vocalStyle.size() <= 100
+                    && request.resource.data.lyricsPreview is string && request.resource.data.lyricsPreview.size() <= 10000
+                    && request.resource.data.videoPrompt is string && request.resource.data.videoPrompt.size() <= 1000
+                    && request.resource.data.videoTemplateName is string && request.resource.data.videoTemplateName.size() <= 100
+                    && request.resource.data.bibleVerse is string && request.resource.data.bibleVerse.size() <= 500
+                    && request.resource.data.targetStudio in ['AUDIO', 'LYRICS', 'VIDEO', 'MUSIC_VIDEO']
+                    && request.resource.data.keys().hasOnly([
+                      'userId', 'category', 'title', 'summary', 'topic', 'genre', 'mood',
+                      'language', 'tempo', 'instruments', 'vocalStyle', 'lyricsPreview',
+                      'videoPrompt', 'videoTemplateName', 'bibleVerse', 'targetStudio',
+                      'isDemo', 'createdAt'
+                    ]);
+    }
+
+    // 6. System Collections (Backend-only writes)
+    match /tasks/{taskId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    match /ledger/{entryId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Default Deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

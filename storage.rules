@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /songs/{userId}/{songFile} {
+      // Requirement 4: isolation
+      // Requirement 3: public access check
+      // Read is allowed if owner OR if marked as public in metadata by backend.
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || 
+        resource.metadata.isPublic == 'true'
+      );
+      
+      // Requirement 2: Block client uploads and deletes
+      allow create, delete: if false;
+      
+      // Requirement 1: Block all client-side metadata updates
+      allow update: if false;
+    }
+    
+    // Requirement 5: Default Deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

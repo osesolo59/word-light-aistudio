@@ -1,0 +1,219 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user profile, credits, and preferences",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "credits": { "type": "number" },
+        "appearance": { "type": "string", "enum": ["Light", "Dark", "System Default"] },
+        "language": { "type": "string" },
+        "isPublicProfile": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["credits", "createdAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Publicly visible creator profile without private email or credits",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "bio": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "isPublicProfile": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["isPublicProfile", "updatedAt"]
+    },
+    "Song": {
+      "title": "Song",
+      "description": "Music generated or saved by users",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "lyrics": { "type": "string" },
+        "genre": { "type": "string" },
+        "language": { "type": "string" },
+        "mood": { "type": "string" },
+        "tempo": { "type": "string" },
+        "instruments": { "type": "array" },
+        "vocalStyle": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "isDemo": { "type": "boolean" },
+        "isFavorite": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "allowRemix": { "type": "boolean" },
+        "likeStatus": { "type": "number" },
+        "creatorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "genre", "audioUrl", "isPublic", "isDemo", "createdAt"]
+    },
+    "Lyric": {
+      "title": "Lyric",
+      "description": "Saved user song lyrics, per-section language choices, and synchronized caption cues",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "lyrics": { "type": "string" },
+        "topic": { "type": "string" },
+        "genre": { "type": "string" },
+        "mood": { "type": "string" },
+        "language": { "type": "string" },
+        "scriptureReference": { "type": "string" },
+        "userInstructions": { "type": "string" },
+        "generationSource": { "type": "string", "enum": ["AI_GEMINI", "DEMO"] },
+        "sectionLanguages": { "type": "object" },
+        "captionCues": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "lyrics", "createdAt"]
+    },
+    "VideoProject": {
+      "title": "VideoProject",
+      "description": "Video studio template or photo slideshow project",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "prompt": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "templateName": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "captions": { "type": "string" },
+        "captionCues": { "type": "array" },
+        "captionDisplayMode": { "type": "string", "enum": ["BOTH", "ENGLISH_ONLY", "TWI_ONLY"] },
+        "isDemo": { "type": "boolean" },
+        "creatorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "templateName", "isDemo", "createdAt"]
+    },
+    "MusicVideoProject": {
+      "title": "MusicVideoProject",
+      "description": "Combined music video project with bilingual captions",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "songId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "bibleVerse": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "captions": { "type": "string" },
+        "captionCues": { "type": "array" },
+        "captionDisplayMode": { "type": "string", "enum": ["BOTH", "ENGLISH_ONLY", "TWI_ONLY"] },
+        "isDemo": { "type": "boolean" },
+        "creatorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "songId", "videoId", "isDemo", "createdAt"]
+    },
+    "AudioMixProject": {
+      "title": "AudioMixProject",
+      "description": "Multi-track English and Twi Gospel audio mix and MP3 export project",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "language": { "type": "string" },
+        "sectionLanguages": { "type": "object" },
+        "lyrics": { "type": "string" },
+        "captionCues": { "type": "array" },
+        "tracks": { "type": "array" },
+        "totalDurationMs": { "type": "number" },
+        "localMp3Path": { "type": "string" },
+        "isDemo": { "type": "boolean" },
+        "creatorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "language", "tracks", "totalDurationMs", "isDemo", "createdAt"]
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "User-owned playlist",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "songIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "createdAt"]
+    },
+    "CreativeIdea": {
+      "title": "CreativeIdea",
+      "description": "Saved creative idea from local AI Idea Generator",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "summary": { "type": "string" },
+        "topic": { "type": "string" },
+        "genre": { "type": "string" },
+        "mood": { "type": "string" },
+        "language": { "type": "string" },
+        "tempo": { "type": "string" },
+        "instruments": { "type": "array" },
+        "vocalStyle": { "type": "string" },
+        "lyricsPreview": { "type": "string" },
+        "videoPrompt": { "type": "string" },
+        "videoTemplateName": { "type": "string" },
+        "bibleVerse": { "type": "string" },
+        "targetStudio": { "type": "string", "enum": ["AUDIO", "LYRICS", "VIDEO", "MUSIC_VIDEO"] },
+        "isDemo": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "category", "title", "targetStudio", "isDemo", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only user profile and credits"
+    },
+    "/public_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public creator profile gated by isPublicProfile"
+    },
+    "/songs/{songId}": {
+      "schema": { "$ref": "#/entities/Song" },
+      "description": "Songs owned by users"
+    },
+    "/lyrics/{lyricId}": {
+      "schema": { "$ref": "#/entities/Lyric" },
+      "description": "Saved user lyrics owned by users"
+    },
+    "/audio_mixes/{mixId}": {
+      "schema": { "$ref": "#/entities/AudioMixProject" },
+      "description": "Multi-track audio mix projects owned by users"
+    },
+    "/ideas/{ideaId}": {
+      "schema": { "$ref": "#/entities/CreativeIdea" },
+      "description": "Saved creative ideas owned by users"
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/VideoProject" },
+      "description": "Video projects owned by users"
+    },
+    "/music_videos/{mvId}": {
+      "schema": { "$ref": "#/entities/MusicVideoProject" },
+      "description": "Music video creator projects owned by users"
+    },
+    "/playlists/{playlistId}": {
+      "schema": { "$ref": "#/entities/Playlist" },
+      "description": "Playlists owned by users"
+    }
+  }
+}

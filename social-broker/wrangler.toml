@@ -1,0 +1,9 @@
+name = "word-and-light-social-broker"
+main = "src/worker.ts"
+compatibility_date = "2025-01-15"
+
+[vars]
+FIREBASE_PROJECT_ID = "gen-lang-client-0518223416"
+APP_REDIRECT_SCHEME = "com.aistudio.aimusic.wltv.jqr8x"
+APP_REDIRECT_HOST = "oauth2redirect"
+META_GRAPH_VERSION = "v21.0"

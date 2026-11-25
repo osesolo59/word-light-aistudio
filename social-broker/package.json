@@ -1,0 +1,15 @@
+{
+  "name": "word-and-light-social-broker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free-tier Cloudflare Worker OAuth Token Broker & Compliance Host for Word & Light AI STUDIO (no Firebase Blaze billing required)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0"
+  }
+}

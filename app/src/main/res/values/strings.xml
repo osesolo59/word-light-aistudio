@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Word &amp; Light AI STUDIO</string>
+    <string name="connect_with_us_title">Connect With Us</string>
+    <string name="connect_with_us_subtitle">Official channels for Word &amp; Light TV &amp; Christians Strong Foundation Ministry</string>
+    <string name="connect_admin_config_title">Configure Social Media Links</string>
+    <string name="connect_admin_config_hint">Only verified https:// links are shown to users. Leave any platform blank to hide it.</string>
+    <string name="publishing_channels_title">Direct Video Publishing</string>
+    <string name="publishing_channels_subtitle">Authorize official OAuth 2.0 publishing for Word &amp; Light TV without storing passwords or secrets in the app.</string>
+    <string name="publishing_sheet_title">Publish Video to Channels</string>
+    <string name="youtube_publish_title">Publish to YouTube</string>
+</resources>

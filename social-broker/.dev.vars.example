@@ -1,0 +1,13 @@
+# Local development secrets template for Cloudflare Worker (DO NOT COMMIT .dev.vars)
+# For production on Cloudflare Free Plan, upload via:
+#   npx wrangler secret put META_APP_ID
+#   npx wrangler secret put META_APP_SECRET
+#   npx wrangler secret put TIKTOK_CLIENT_KEY
+#   npx wrangler secret put TIKTOK_CLIENT_SECRET
+#   npx wrangler secret put TIKTOK_SITE_VERIFICATION
+
+META_APP_ID=
+META_APP_SECRET=
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+TIKTOK_SITE_VERIFICATION=

@@ -1,0 +1,6 @@
+{
+  "name": "Word & Light AI STUDIO",
+  "description": "Your Ideas. Your Lyrics. Your Music. Your Videos. Professional AI creative studio app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
