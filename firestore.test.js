@@ -507,5 +507,103 @@ test("Audio Mixes & Bilingual Metadata: owner CRUD and cross-user isolation on /
   await assertSucceeds(aliceDb.collection("music_videos").doc("mv_bi_1").delete());
 });
 
+test("Creative Projects Gallery: owner CRUD, filtered query, immutable fields, and negative security bounds on /creative_projects", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  const past = new Date(Date.now() - 2000);
+  const basePayload = {
+    userId: ALICE_UID,
+    title: "Aseda Praise Anthem",
+    genre: "Gospel",
+    projectType: "SONG",
+    language: "Mixed English + Twi",
+    description: "Sunday worship opening song in Royal Purple & Gold branding",
+    status: "IN_PROGRESS",
+    favorite: false,
+    coverTheme: "PURPLE_GOLD",
+    linkedSourceCollection: "",
+    linkedSourceId: "",
+    createdAt: past,
+    updatedAt: past,
+  };
+
+  // Unauthenticated read/list/create must fail
+  await assertFails(unauthDb.collection("creative_projects").where("userId", "==", ALICE_UID).get());
+  await assertFails(unauthDb.collection("creative_projects").doc("proj_1").set(basePayload));
+
+  // Valid owner create matching Kotlin payload succeeds
+  await assertSucceeds(aliceDb.collection("creative_projects").doc("proj_1").set(basePayload));
+
+  // Filtered owner list query succeeds; unfiltered query fails
+  await assertSucceeds(aliceDb.collection("creative_projects").where("userId", "==", ALICE_UID).get());
+  await assertFails(aliceDb.collection("creative_projects").get());
+
+  // Cross-user get, list, update, delete fail
+  await assertFails(bobDb.collection("creative_projects").doc("proj_1").get());
+  await assertFails(bobDb.collection("creative_projects").where("userId", "==", ALICE_UID).get());
+  await assertFails(bobDb.collection("creative_projects").doc("proj_1").update({ title: "Hijacked" }));
+  await assertFails(bobDb.collection("creative_projects").doc("proj_1").delete());
+
+  // Partial update on allowed mutable fields succeeds (createdAt preserved)
+  await assertSucceeds(
+    aliceDb.collection("creative_projects").doc("proj_1").update({
+      title: "Aseda Praise Anthem (Mastered)",
+      genre: "Highlife",
+      favorite: true,
+      status: "COMPLETED",
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+
+  // Immutable createdAt or userId mutation fails
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_1").update({
+      createdAt: new Date(Date.now() - 100),
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_1").update({
+      userId: BOB_UID,
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
+
+  // Ghost field & @DocumentId 'id' key rejected on create/update
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_with_id").set({
+      ...basePayload,
+      id: "proj_with_id",
+    })
+  );
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_1").update({
+      isAdmin: true,
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
+
+  // Future timestamp & invalid enum rejected
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_future").set({
+      ...basePayload,
+      createdAt: new Date(Date.now() + 60000),
+      updatedAt: new Date(Date.now() + 60000),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("creative_projects").doc("proj_bad_type").set({
+      ...basePayload,
+      projectType: "UNKNOWN_TYPE",
+    })
+  );
+
+  // Owner delete succeeds
+  await assertSucceeds(aliceDb.collection("creative_projects").doc("proj_1").delete());
+});
+
+
 
 

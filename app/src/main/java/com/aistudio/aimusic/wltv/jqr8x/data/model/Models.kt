@@ -435,3 +435,61 @@ data class StudioIdeaDraft(
     val transferId: String,
     val idea: CreativeIdea
 )
+
+enum class CreativeProjectType(val label: String) {
+    SONG("Song"),
+    LYRICS("Lyrics"),
+    AUDIO_MIX("Gospel Mix"),
+    VIDEO("Video"),
+    MUSIC_VIDEO("Music Video"),
+    MINISTRY("Ministry");
+
+    companion object {
+        fun fromKey(value: String?): CreativeProjectType =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: SONG
+    }
+}
+
+enum class CreativeProjectStatus(val label: String) {
+    DRAFT("Draft"),
+    IN_PROGRESS("In Progress"),
+    COMPLETED("Completed"),
+    PUBLISHED("Published");
+
+    companion object {
+        fun fromKey(value: String?): CreativeProjectStatus =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: IN_PROGRESS
+    }
+}
+
+enum class ProjectCoverTheme(val label: String) {
+    PURPLE_GOLD("Royal Purple & Gold"),
+    GOLD_RADIANCE("Gold Radiance"),
+    ROYAL_NIGHT("Royal Night"),
+    SANCTUARY_MINT("Sanctuary Mint");
+
+    companion object {
+        fun fromKey(value: String?): ProjectCoverTheme =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: PURPLE_GOLD
+    }
+}
+
+@androidx.annotation.Keep
+@IgnoreExtraProperties
+data class CreativeProject(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val title: String = "",
+    val genre: String = "Gospel",
+    val projectType: String = CreativeProjectType.SONG.name,
+    val language: String = "English",
+    val description: String = "",
+    val status: String = CreativeProjectStatus.IN_PROGRESS.name,
+    val favorite: Boolean = false,
+    val coverTheme: String = ProjectCoverTheme.PURPLE_GOLD.name,
+    val linkedSourceCollection: String = "",
+    val linkedSourceId: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+

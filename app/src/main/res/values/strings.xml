@@ -8,4 +8,6 @@
     <string name="publishing_channels_subtitle">Authorize official OAuth 2.0 publishing for Word &amp; Light TV without storing passwords or secrets in the app.</string>
     <string name="publishing_sheet_title">Publish Video to Channels</string>
     <string name="youtube_publish_title">Publish to YouTube</string>
+    <string name="project_gallery_title">Project Gallery</string>
+    <string name="project_gallery_subtitle">Saved creative projects &amp; metadata</string>
 </resources>

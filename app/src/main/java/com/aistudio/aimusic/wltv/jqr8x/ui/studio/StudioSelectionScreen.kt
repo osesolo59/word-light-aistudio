@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.AutoAwesomeMosaic
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Movie
@@ -40,7 +41,8 @@ fun StudioSelectionScreen(
     repositoryOverride: MusicRepository? = null,
     ideaGeneratorViewModel: IdeaGeneratorViewModel? = null,
     onUseIdea: (CreativeIdea) -> Unit = {},
-    onNavigateToAudioMixer: () -> Unit = {}
+    onNavigateToAudioMixer: () -> Unit = {},
+    onNavigateToProjectGallery: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val repository = remember(repositoryOverride) { repositoryOverride ?: MusicRepository(context) }
@@ -165,6 +167,16 @@ fun StudioSelectionScreen(
                     color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier.testTag("hub_music_video_creator_card"),
                     onClick = onNavigateToCreator
+                )
+            }
+            item {
+                StudioOptionCard(
+                    title = "Project Gallery",
+                    description = "Store, search, filter by genre, and organize your creative projects with creation date metadata.",
+                    icon = Icons.Outlined.AutoAwesomeMosaic,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.testTag("hub_project_gallery_card"),
+                    onClick = onNavigateToProjectGallery
                 )
             }
         }

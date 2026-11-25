@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoAwesomeMosaic
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
@@ -59,7 +60,8 @@ fun HomeScreen(
     onUseIdea: (CreativeIdea) -> Unit = {},
     onNavigateToAudioMixer: () -> Unit = {},
     onNavigateToConnectWithUs: () -> Unit = {},
-    socialLinksRepositoryOverride: SocialLinksRepository? = null
+    socialLinksRepositoryOverride: SocialLinksRepository? = null,
+    onNavigateToProjectGallery: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val repository = remember(repositoryOverride) { repositoryOverride ?: MusicRepository(context) }
@@ -255,6 +257,12 @@ fun HomeScreen(
                 configuredLinks = configuredSocialLinks,
                 onClick = onNavigateToConnectWithUs
             )
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        item {
+            ProjectGalleryHomeShortcutCard(onClick = onNavigateToProjectGallery)
         }
 
         item { Spacer(modifier = Modifier.height(24.dp)) }
@@ -565,6 +573,78 @@ fun ConnectWithUsHomeShortcutCard(
                 Icon(
                     imageVector = Icons.Default.ChevronRight,
                     contentDescription = "Open Connect With Us",
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectGalleryHomeShortcutCard(onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .minimumInteractiveComponentSize()
+            .testTag("home_project_gallery_card"),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesomeMosaic,
+                        contentDescription = "Project Gallery",
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier
+                            .padding(10.dp)
+                            .size(24.dp)
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Project Gallery",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Organize saved songs, lyrics, mixes & videos by genre and date",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = onClick,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("home_open_project_gallery_button")
+            ) {
+                Text("Gallery", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = "Open Project Gallery",
                     modifier = Modifier.size(18.dp)
                 )
             }

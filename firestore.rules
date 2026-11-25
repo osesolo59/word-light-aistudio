@@ -140,6 +140,53 @@ service cloud.firestore {
         && isValidSlideshowMeta(data);
     }
 
+    function isValidProjectId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCreativeProjectFields(data) {
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.genre is string && data.genre.size() >= 1 && data.genre.size() <= 60
+        && data.projectType in ['SONG', 'LYRICS', 'AUDIO_MIX', 'VIDEO', 'MUSIC_VIDEO', 'MINISTRY']
+        && data.language is string && data.language.size() >= 1 && data.language.size() <= 50
+        && data.description is string && data.description.size() <= 1000
+        && data.status in ['DRAFT', 'IN_PROGRESS', 'COMPLETED', 'PUBLISHED']
+        && data.favorite is bool
+        && data.coverTheme in ['PURPLE_GOLD', 'GOLD_RADIANCE', 'ROYAL_NIGHT', 'SANCTUARY_MINT']
+        && data.linkedSourceCollection is string && data.linkedSourceCollection.size() <= 60
+        && data.linkedSourceId is string && data.linkedSourceId.size() <= 128;
+    }
+
+    function isValidCreativeProjectCreate(data) {
+      return data.keys().hasAll([
+          'userId', 'title', 'genre', 'projectType', 'language',
+          'description', 'status', 'favorite', 'coverTheme',
+          'linkedSourceCollection', 'linkedSourceId', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'title', 'genre', 'projectType', 'language',
+          'description', 'status', 'favorite', 'coverTheme',
+          'linkedSourceCollection', 'linkedSourceId', 'createdAt', 'updatedAt'
+        ])
+        && data.userId == request.auth.uid
+        && data.createdAt is timestamp && data.createdAt <= request.time
+        && data.updatedAt is timestamp && data.updatedAt <= request.time
+        && isValidCreativeProjectFields(data);
+    }
+
+    function isValidCreativeProjectUpdate(data, existing) {
+      return data.userId == existing.userId
+        && data.createdAt == existing.createdAt
+        && data.linkedSourceCollection == existing.linkedSourceCollection
+        && data.linkedSourceId == existing.linkedSourceId
+        && data.updatedAt is timestamp && data.updatedAt <= request.time
+        && data.diff(existing).affectedKeys().hasOnly([
+          'title', 'genre', 'projectType', 'language',
+          'description', 'status', 'favorite', 'coverTheme', 'updatedAt'
+        ])
+        && isValidCreativeProjectFields(data);
+    }
+
     // 1. Private User Profile & Credits (strictly owner-only read; fixed initial demo credits; credits immutable from client)
     match /users/{userId} {
       allow read: if isOwner(userId);
@@ -286,6 +333,15 @@ service cloud.firestore {
                       'videoPrompt', 'videoTemplateName', 'bibleVerse', 'targetStudio',
                       'isDemo', 'createdAt'
                     ]);
+    }
+
+    // 5c. User-Saved Creative Projects Gallery (strict owner-only CRUD)
+    match /creative_projects/{projectId} {
+      allow get: if isSignedIn() && isValidProjectId(projectId) && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidProjectId(projectId) && isValidCreativeProjectCreate(request.resource.data);
+      allow update: if isSignedIn() && isValidProjectId(projectId) && resource.data.userId == request.auth.uid && isValidCreativeProjectUpdate(request.resource.data, resource.data);
+      allow delete: if isSignedIn() && isValidProjectId(projectId) && resource.data.userId == request.auth.uid;
     }
 
     // 6. System Collections (Backend-only writes)

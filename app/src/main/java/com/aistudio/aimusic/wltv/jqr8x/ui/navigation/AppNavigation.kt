@@ -28,9 +28,14 @@ import com.aistudio.aimusic.wltv.jqr8x.ui.player.MiniPlayer
 import com.aistudio.aimusic.wltv.jqr8x.ui.player.LocalMusicPlayer
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aistudio.aimusic.wltv.jqr8x.data.model.CreativeIdea
+import com.aistudio.aimusic.wltv.jqr8x.data.model.CreativeProjectType
 import com.aistudio.aimusic.wltv.jqr8x.data.model.Lyric
 import com.aistudio.aimusic.wltv.jqr8x.data.model.Song
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
+import com.aistudio.aimusic.wltv.jqr8x.data.repository.ProjectGalleryDataSource
+import com.aistudio.aimusic.wltv.jqr8x.data.repository.ProjectGalleryRepository
+import com.aistudio.aimusic.wltv.jqr8x.ui.gallery.ProjectGalleryScreen
+import com.aistudio.aimusic.wltv.jqr8x.ui.gallery.ProjectGalleryViewModel
 import com.aistudio.aimusic.wltv.jqr8x.ui.ideas.AiIdeaGeneratorScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.ideas.IdeaGeneratorViewModel
 import com.aistudio.aimusic.wltv.jqr8x.ui.studio.StudioSelectionScreen
@@ -69,6 +74,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector,
     object ConnectWithUs : Screen("connect_with_us", "Connect With Us", Icons.Outlined.Public, Icons.Filled.Public)
     object ConnectedChannels : Screen("connected_channels", "Direct Publishing", Icons.Outlined.CloudUpload, Icons.Filled.CloudUpload)
     object YouTubePublish : Screen("youtube_publish", "YouTube Publish", Icons.Outlined.CloudUpload, Icons.Filled.CloudUpload)
+    object ProjectGallery : Screen("project_gallery", "Project Gallery", Icons.Outlined.AutoAwesomeMosaic, Icons.Filled.AutoAwesomeMosaic)
 }
 
 val items = listOf(
@@ -85,7 +91,8 @@ fun AppNavigation(
     repositoryOverride: MusicRepository? = null,
     playerManagerOverride: MusicPlayerManager? = null,
     pendingOAuthUriFlow: StateFlow<Uri?>? = null,
-    onConsumeOAuthUri: () -> Unit = {}
+    onConsumeOAuthUri: () -> Unit = {},
+    projectGalleryRepositoryOverride: ProjectGalleryDataSource? = null
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -136,6 +143,12 @@ fun AppNavigation(
 
     val navigateToConnectedChannels: () -> Unit = {
         navController.navigate(Screen.ConnectedChannels.route) {
+            launchSingleTop = true
+        }
+    }
+
+    val navigateToProjectGallery: () -> Unit = {
+        navController.navigate(Screen.ProjectGallery.route) {
             launchSingleTop = true
         }
     }
@@ -281,7 +294,8 @@ fun AppNavigation(
                         onUseIdea = handleUseIdea,
                         onNavigateToAudioMixer = navigateToAudioMixer,
                         onNavigateToConnectWithUs = navigateToConnectWithUs,
-                        socialLinksRepositoryOverride = socialLinksRepository
+                        socialLinksRepositoryOverride = socialLinksRepository,
+                        onNavigateToProjectGallery = navigateToProjectGallery
                     )
                 }
                 composable(Screen.Explore.route) {
@@ -301,7 +315,8 @@ fun AppNavigation(
                         repositoryOverride = repository,
                         ideaGeneratorViewModel = ideaGeneratorViewModel,
                         onUseIdea = handleUseIdea,
-                        onNavigateToAudioMixer = navigateToAudioMixer
+                        onNavigateToAudioMixer = navigateToAudioMixer,
+                        onNavigateToProjectGallery = navigateToProjectGallery
                     )
                 }
 
@@ -421,7 +436,8 @@ fun AppNavigation(
                             }
                         },
                         onNavigateToConnectedChannels = navigateToConnectedChannels,
-                        publishingRepositoryOverride = publishingRepository
+                        publishingRepositoryOverride = publishingRepository,
+                        onNavigateToProjectGallery = navigateToProjectGallery
                     )
                 }
                 composable(Screen.Profile.route) {
@@ -500,6 +516,45 @@ fun AppNavigation(
                         },
                         onOpenConnectedChannels = navigateToConnectedChannels,
                         publishingRepositoryOverride = publishingRepository
+                    )
+                }
+
+                composable(Screen.ProjectGallery.route) {
+                    val projectGalleryRepository = remember(projectGalleryRepositoryOverride, context) {
+                        projectGalleryRepositoryOverride ?: ProjectGalleryRepository(context)
+                    }
+                    val galleryViewModel: ProjectGalleryViewModel = viewModel(
+                        key = "project_gallery_$uid",
+                        factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                                return ProjectGalleryViewModel(projectGalleryRepository, uid) as T
+                            }
+                        }
+                    )
+                    ProjectGalleryScreen(
+                        viewModel = galleryViewModel,
+                        onNavigateBack = {
+                            if (!navController.popBackStack()) {
+                                navController.navigate(Screen.MyProjects.route) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        },
+                        onOpenProjectInStudio = { type ->
+                            val destination = when (type) {
+                                CreativeProjectType.SONG -> Screen.AudioStudio.route
+                                CreativeProjectType.LYRICS -> Screen.LyricsGenerator.route
+                                CreativeProjectType.AUDIO_MIX -> Screen.AudioMixer.route
+                                CreativeProjectType.VIDEO -> Screen.VideoStudio.route
+                                CreativeProjectType.MUSIC_VIDEO -> Screen.MusicVideoCreator.route
+                                CreativeProjectType.MINISTRY -> Screen.Home.route
+                            }
+                            navController.navigate(destination) {
+                                launchSingleTop = true
+                            }
+                        },
+                        musicRepositoryOverride = repository
                     )
                 }
             }

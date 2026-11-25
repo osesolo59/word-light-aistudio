@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.AutoAwesomeMosaic
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -84,7 +85,8 @@ fun LibraryScreen(
     onReopenMixInStudio: ((AudioMixProject) -> Unit)? = null,
     onUseMixInMusicVideo: ((AudioMixProject) -> Unit)? = null,
     onNavigateToConnectedChannels: () -> Unit = {},
-    publishingRepositoryOverride: PublishingRepository? = null
+    publishingRepositoryOverride: PublishingRepository? = null,
+    onNavigateToProjectGallery: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -181,11 +183,29 @@ fun LibraryScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
-            IconButton(
-                onClick = onNavigateToFavorites,
-                modifier = Modifier.testTag("library_favorites_button")
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Icon(Icons.Default.Favorite, contentDescription = "Favorites", tint = MaterialTheme.colorScheme.primary)
+                OutlinedButton(
+                    onClick = onNavigateToProjectGallery,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("library_open_gallery_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesomeMosaic,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Gallery")
+                }
+                IconButton(
+                    onClick = onNavigateToFavorites,
+                    modifier = Modifier.testTag("library_favorites_button")
+                ) {
+                    Icon(Icons.Default.Favorite, contentDescription = "Favorites", tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
 

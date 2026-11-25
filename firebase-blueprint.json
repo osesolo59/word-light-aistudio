@@ -176,6 +176,27 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "category", "title", "targetStudio", "isDemo", "createdAt"]
+    },
+    "CreativeProject": {
+      "title": "CreativeProject",
+      "description": "User-saved creative project displayed in the Project Gallery with title, genre, type, language, status, and server timestamps",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "genre": { "type": "string" },
+        "projectType": { "type": "string", "enum": ["SONG", "LYRICS", "AUDIO_MIX", "VIDEO", "MUSIC_VIDEO", "MINISTRY"] },
+        "language": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "IN_PROGRESS", "COMPLETED", "PUBLISHED"] },
+        "favorite": { "type": "boolean" },
+        "coverTheme": { "type": "string", "enum": ["PURPLE_GOLD", "GOLD_RADIANCE", "ROYAL_NIGHT", "SANCTUARY_MINT"] },
+        "linkedSourceCollection": { "type": "string" },
+        "linkedSourceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Set by server via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Set by server via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "title", "genre", "projectType", "language", "description", "status", "favorite", "coverTheme", "linkedSourceCollection", "linkedSourceId", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -202,6 +223,10 @@
     "/ideas/{ideaId}": {
       "schema": { "$ref": "#/entities/CreativeIdea" },
       "description": "Saved creative ideas owned by users"
+    },
+    "/creative_projects/{projectId}": {
+      "schema": { "$ref": "#/entities/CreativeProject" },
+      "description": "User-saved creative projects displayed in the Project Gallery"
     },
     "/videos/{videoId}": {
       "schema": { "$ref": "#/entities/VideoProject" },
