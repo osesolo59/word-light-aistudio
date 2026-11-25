@@ -18,9 +18,9 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import android.annotation.SuppressLint
 import android.content.ContextWrapper
 import androidx.activity.ComponentActivity
-import com.aistudio.aimusic.wltv.jqr8x.R
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -145,11 +145,21 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit
 ) {
+    @SuppressLint("DiscouragedApi")
     val clientId = try {
-        context.getString(R.string.default_web_client_id)
+        val resId = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        if (resId != 0) context.getString(resId).trim() else ""
     } catch (e: Exception) {
-        Log.e("Auth", "Default Web Client ID not found in strings.xml. Ensure google-services.json is present and the plugin is applied.", e)
-        onAuthError("Google Sign-In configuration missing (R.string.default_web_client_id)")
+        Log.e("Auth", "Default Web Client ID not found in resources. Ensure google-services.json is present and the plugin is applied.", e)
+        ""
+    }
+    if (clientId.isEmpty()) {
+        Log.e("Auth", "Default Web Client ID missing. Ensure app/google-services.json is present and google-services plugin is applied.")
+        onAuthError("Google Sign-In configuration missing (default_web_client_id)")
         return
     }
 
