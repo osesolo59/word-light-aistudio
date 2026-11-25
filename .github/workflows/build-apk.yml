@@ -321,9 +321,13 @@ jobs:
               echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
               echo ""
               if [ -f "build-apk.log" ]; then
-                echo "### Last 40 lines of Gradle build log"
+                echo "### Compiler / Build Error Lines"
                 echo '```text'
-                tail -n 40 build-apk.log || true
+                grep -E "^(e:|FAILURE:|Execution failed|\* What went wrong:)" build-apk.log | head -n 40 || true
+                echo '```'
+                echo "### Last 100 lines of Gradle build log"
+                echo '```text'
+                tail -n 100 build-apk.log || true
                 echo '```'
               fi
             } >> "$GITHUB_STEP_SUMMARY"
