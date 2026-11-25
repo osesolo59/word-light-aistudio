@@ -146,6 +146,25 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare Firebase configuration
+        id: firebase_config
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON_B64:-}" ]; then
+            echo "Decoding app/google-services.json from GOOGLE_SERVICES_JSON_B64 secret..."
+            if ! printf '%s' "$GOOGLE_SERVICES_JSON_B64" | tr -d '\r\n ' | base64 -d > "app/google-services.json"; then
+              rm -f "app/google-services.json"
+            fi
+          fi
+          if [ ! -f "app/google-services.json" ] || [ ! -s "app/google-services.json" ]; then
+            echo "::warning::app/google-services.json is missing. The APK will compile safely, but Firebase Auth/Firestore/AI will require app/google-services.json to be added."
+          else
+            echo "Verified app/google-services.json is present."
+          fi
+
       - name: Build debug APK
         id: build_apk
         shell: bash

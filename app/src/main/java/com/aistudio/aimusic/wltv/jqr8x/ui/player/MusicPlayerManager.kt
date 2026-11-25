@@ -50,14 +50,15 @@ class MusicPlayerManager(
 
     init {
         if (connectController) {
-            val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-            controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-            controllerFuture?.addListener({
-                mediaController = try {
-                    controllerFuture?.get()
-                } catch (_: Exception) {
-                    null
-                } ?: return@addListener
+            try {
+                val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
+                controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+                controllerFuture?.addListener({
+                    mediaController = try {
+                        controllerFuture?.get()
+                    } catch (_: Exception) {
+                        null
+                    } ?: return@addListener
                 mediaController?.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
@@ -111,6 +112,9 @@ class MusicPlayerManager(
                 _shuffleEnabled.value = mediaController?.shuffleModeEnabled ?: false
                 _repeatMode.value = mediaController?.repeatMode ?: Player.REPEAT_MODE_OFF
             }, MoreExecutors.directExecutor())
+            } catch (e: Exception) {
+                android.util.Log.e("MusicPlayerManager", "Failed to bind MediaController", e)
+            }
         }
     }
 

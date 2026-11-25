@@ -7,14 +7,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import com.aistudio.aimusic.wltv.jqr8x.data.model.UserProfile
 import com.aistudio.aimusic.wltv.jqr8x.data.publishing.OAuthPkceManager
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
@@ -23,6 +35,7 @@ import com.aistudio.aimusic.wltv.jqr8x.ui.navigation.AppNavigation
 import com.aistudio.aimusic.wltv.jqr8x.ui.theme.WordAndLightTheme
 import com.aistudio.aimusic.wltv.jqr8x.util.configureAppCheck
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,8 +48,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // 1. Configure App Check first
+
         try {
             configureAppCheck(this, intent)
         } catch (e: Exception) {
@@ -44,9 +56,9 @@ class MainActivity : ComponentActivity() {
         }
 
         captureOAuthIntentIfPresent(intent)
-        
+
         enableEdgeToEdge()
-        
+
         setContent {
             AppContent(
                 pendingOAuthUriFlow = _pendingOAuthUri.asStateFlow(),
@@ -72,25 +84,45 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppContent(
     pendingOAuthUriFlow: StateFlow<Uri?>? = null,
-    onConsumeOAuthUri: () -> Unit = {}
+    onConsumeOAuthUri: () -> Unit = {},
+    firebaseReadyOverride: Boolean? = null
 ) {
     val context = LocalContext.current
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
-    var globalError by remember { mutableStateOf<String?>(null) }
-
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
+    var initAttempt by remember { mutableIntStateOf(0) }
+    val isFirebaseReady = remember(context, initAttempt, firebaseReadyOverride) {
+        firebaseReadyOverride ?: runCatching {
+            FirebaseApp.getInstance()
+            true
+        }.getOrElse {
+            runCatching {
+                FirebaseApp.initializeApp(context) != null
+            }.getOrDefault(false)
         }
     }
 
-    LaunchedEffect(currentUser) {
-        if (currentUser != null) {
+    var currentUser by remember(isFirebaseReady) {
+        mutableStateOf(
+            if (isFirebaseReady) runCatching { Firebase.auth.currentUser }.getOrNull() else null
+        )
+    }
+    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var globalError by remember { mutableStateOf<String?>(null) }
+
+    if (isFirebaseReady) {
+        DisposableEffect(Unit) {
+            val firebaseAuth = runCatching { Firebase.auth }.getOrNull()
+            val listener = FirebaseAuth.AuthStateListener { auth ->
+                currentUser = auth.currentUser
+            }
+            firebaseAuth?.addAuthStateListener(listener)
+            onDispose {
+                firebaseAuth?.removeAuthStateListener(listener)
+            }
+        }
+    }
+
+    LaunchedEffect(isFirebaseReady, currentUser) {
+        if (isFirebaseReady && currentUser != null) {
             try {
                 val repository = MusicRepository(context)
                 repository.getUserProfile().collectLatest {
@@ -118,20 +150,66 @@ fun AppContent(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            if (globalError != null) {
-                androidx.compose.foundation.layout.Box(
-                    modifier = Modifier.fillMaxSize().padding(16.dp),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
+            if (!isFirebaseReady) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    androidx.compose.material3.Text(
+                    Column(
+                        modifier = Modifier.widthIn(max = 480.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "WORD & LIGHT AI STUDIO",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Firebase configuration (app/google-services.json) is missing in this APK build, so sign-in and cloud studio services cannot start yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Add app/google-services.json to your GitHub build (or install the APK built directly in AI Studio) and reopen the app.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Button(
+                            onClick = { initAttempt++ },
+                            modifier = Modifier.testTag("retry_firebase_init_button")
+                        ) {
+                            Text("Retry Initialization")
+                        }
+                    }
+                }
+            } else if (globalError != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
                         text = globalError!!,
                         color = MaterialTheme.colorScheme.error,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        textAlign = TextAlign.Center
                     )
                 }
             } else if (currentUser == null) {
                 AuthScreen(
-                    onAuthSuccess = { currentUser = Firebase.auth.currentUser }
+                    onAuthSuccess = {
+                        currentUser = runCatching { Firebase.auth.currentUser }.getOrNull()
+                    }
                 )
             } else {
                 val uid = currentUser!!.uid

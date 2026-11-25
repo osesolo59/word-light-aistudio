@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
+import com.aistudio.aimusic.wltv.jqr8x.AppContent
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.ExploreScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.FavoritesScreen
@@ -164,5 +165,17 @@ class AuditScreensUiTest {
         assertEquals(false, manager.isPlaying.value)
         assertTrue(manager.queueTitles.value.isEmpty())
         manager.release()
+    }
+
+    @Test
+    fun appContent_withoutDefaultFirebaseApp_showsConfigMessageWithoutCrashing() {
+        composeRule.setContent {
+            AppContent(firebaseReadyOverride = false)
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("retry_firebase_init_button").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("retry_firebase_init_button").assertIsDisplayed()
     }
 }
