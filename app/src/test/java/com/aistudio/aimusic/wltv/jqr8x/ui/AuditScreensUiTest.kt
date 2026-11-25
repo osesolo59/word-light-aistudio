@@ -10,6 +10,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.aistudio.aimusic.wltv.jqr8x.AppContent
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
+import com.aistudio.aimusic.wltv.jqr8x.ui.auth.AuthScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.ExploreScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.FavoritesScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.library.LibraryScreen
@@ -177,5 +178,27 @@ class AuditScreensUiTest {
         composeRule.onNodeWithTag("retry_firebase_init_button").assertIsDisplayed().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("retry_firebase_init_button").assertIsDisplayed()
+    }
+
+    @Test
+    fun authScreen_rendersSignInScreenAndGoogleClientResource() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val clientIdRes = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        assertTrue("Expected default_web_client_id from google-services.json", clientIdRes != 0)
+        assertTrue(context.getString(clientIdRes).isNotBlank())
+
+        composeRule.setContent {
+            WordAndLightTheme {
+                AuthScreen(onAuthSuccess = {})
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("WORD & LIGHT AI STUDIO").assertIsDisplayed()
+        composeRule.onNodeWithText("Continue with Google").assertIsDisplayed()
     }
 }

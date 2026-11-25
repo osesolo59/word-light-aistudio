@@ -121,9 +121,10 @@ fun AppContent(
         }
     }
 
-    LaunchedEffect(isFirebaseReady, currentUser) {
+    LaunchedEffect(isFirebaseReady, currentUser, initAttempt) {
         if (isFirebaseReady && currentUser != null) {
             try {
+                globalError = null
                 val repository = MusicRepository(context)
                 repository.getUserProfile().collectLatest {
                     userProfile = it
@@ -132,7 +133,7 @@ fun AppContent(
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("AppContent", "Failed to load user profile", e)
-                globalError = "Profile Load Error: ${e.localizedMessage}"
+                globalError = "Profile Load Error: ${e.localizedMessage ?: "Unable to connect to cloud profile."}"
             }
         } else {
             userProfile = null
@@ -196,14 +197,30 @@ fun AppContent(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = globalError!!,
-                        color = MaterialTheme.colorScheme.error,
-                        textAlign = TextAlign.Center
-                    )
+                    Column(
+                        modifier = Modifier.widthIn(max = 480.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = globalError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                globalError = null
+                                initAttempt++
+                            },
+                            modifier = Modifier.testTag("retry_profile_load_button")
+                        ) {
+                            Text("Retry Connection")
+                        }
+                    }
                 }
             } else if (currentUser == null) {
                 AuthScreen(
