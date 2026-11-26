@@ -11,6 +11,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.aistudio.aimusic.wltv.jqr8x.AppContent
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
 import com.aistudio.aimusic.wltv.jqr8x.ui.auth.AuthScreen
+import com.aistudio.aimusic.wltv.jqr8x.ui.auth.formatGoogleAuthError
+import com.google.android.gms.common.api.CommonStatusCodes
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.ExploreScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.explore.FavoritesScreen
 import com.aistudio.aimusic.wltv.jqr8x.ui.library.LibraryScreen
@@ -199,6 +201,15 @@ class AuditScreensUiTest {
         composeRule.waitForIdle()
 
         composeRule.onNodeWithText("WORD & LIGHT AI STUDIO").assertIsDisplayed()
+        composeRule.onNodeWithTag("google_sign_in_button").assertIsDisplayed()
         composeRule.onNodeWithText("Continue with Google").assertIsDisplayed()
+        composeRule.onNodeWithTag("legacy_google_sign_in_button").assertIsDisplayed()
+
+        val devErrorMsg = formatGoogleAuthError(
+            context,
+            RuntimeException("10: DEVELOPER_ERROR"),
+            codeOverride = CommonStatusCodes.DEVELOPER_ERROR
+        )
+        assertTrue(devErrorMsg.contains("SHA-1"))
     }
 }

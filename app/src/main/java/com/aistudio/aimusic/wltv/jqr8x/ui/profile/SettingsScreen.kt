@@ -240,7 +240,7 @@ fun SettingsScreen(
                 Button(
                     onClick = {
                         showLogoutDialog = false
-                        signOut(credentialManager, scope)
+                        signOut(credentialManager, scope, context = context)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
