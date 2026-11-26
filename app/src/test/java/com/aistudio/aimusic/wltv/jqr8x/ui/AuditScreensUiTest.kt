@@ -212,5 +212,11 @@ class AuditScreensUiTest {
             codeOverride = CommonStatusCodes.DEVELOPER_ERROR
         )
         assertTrue(devErrorMsg.contains("SHA-1"))
+
+        val certHashErrorMsg = formatGoogleAuthError(
+            context,
+            RuntimeException("There was an error while trying to get your package certificate hash.")
+        )
+        assertTrue(certHashErrorMsg.contains("Firebase Console"))
     }
 }

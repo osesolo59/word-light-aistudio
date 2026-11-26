@@ -111,40 +111,54 @@ jobs:
 
       - name: Prepare debug keystore
         id: keystore
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f "./debug.keystore" ] && [ -s "./debug.keystore.base64" ]; then
-            echo "Decoding ./debug.keystore.base64..."
+          if [ -n "${DEBUG_KEYSTORE_B64:-}" ]; then
+            echo "Decoding ./debug.keystore from DEBUG_KEYSTORE_B64 secret..."
+            if ! printf '%s' "$DEBUG_KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > "./debug.keystore"; then
+              rm -f "./debug.keystore"
+              echo "ERROR: DEBUG_KEYSTORE_B64 secret could not be base64-decoded."
+              exit 1
+            fi
+          elif [ -s "./debug.keystore.base64" ]; then
+            echo "Decoding ./debug.keystore.base64 from repository..."
             if ! tr -d '\r\n ' < "./debug.keystore.base64" | base64 -d > "./debug.keystore"; then
               rm -f "./debug.keystore"
+              echo "ERROR: ./debug.keystore.base64 could not be base64-decoded."
+              exit 1
             fi
           fi
 
           if [ ! -f "./debug.keystore" ] || [ ! -s "./debug.keystore" ]; then
-            KEYTOOL_BIN="keytool"
-            if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
-              KEYTOOL_BIN="${JAVA_HOME}/bin/keytool"
-            fi
-            if ! command -v "$KEYTOOL_BIN" >/dev/null 2>&1; then
-              echo "ERROR: keytool not found in configured Java installation."
-              exit 1
-            fi
-            "$KEYTOOL_BIN" -genkeypair \
-              -noprompt \
-              -keystore ./debug.keystore \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          if [ ! -f "./debug.keystore" ] || [ ! -s "./debug.keystore" ]; then
-            echo "ERROR: ./debug.keystore could not be prepared or is empty."
+            echo "ERROR: Persistent debug keystore is missing."
+            echo "FIX: Set the DEBUG_KEYSTORE_B64 repository secret (base64 of debug.keystore) or include debug.keystore.base64 in the repository. Refusing to generate a temporary random keystore."
             exit 1
           fi
+
+          KEYTOOL_BIN="keytool"
+          if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/keytool" ]; then
+            KEYTOOL_BIN="${JAVA_HOME}/bin/keytool"
+          fi
+          if ! command -v "$KEYTOOL_BIN" >/dev/null 2>&1; then
+            echo "ERROR: keytool not found in configured Java installation."
+            exit 1
+          fi
+
+          # Verify storepass ("android") and alias ("androiddebugkey") expected by app/build.gradle.kts
+          KEYTOOL_OUT=$("$KEYTOOL_BIN" -list -v -keystore ./debug.keystore -storepass android -alias androiddebugkey 2>&1) || {
+            echo "ERROR: ./debug.keystore failed verification for alias 'androiddebugkey' with the expected debug storepass."
+            exit 1
+          }
+          KEYSTORE_SHA1=$(printf '%s\n' "$KEYTOOL_OUT" | sed -n 's/.*SHA1:[[:space:]]*//p' | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          KEYSTORE_SHA256=$(printf '%s\n' "$KEYTOOL_OUT" | sed -n 's/.*SHA256:[[:space:]]*//p' | head -n 1)
+          if [ -z "$KEYSTORE_SHA1" ]; then
+            echo "ERROR: Could not extract SHA-1 fingerprint from ./debug.keystore."
+            exit 1
+          fi
+          echo "Verified debug keystore alias 'androiddebugkey' (SHA1=${KEYSTORE_SHA1}, SHA256=${KEYSTORE_SHA256:-unknown})."
 
       - name: Prepare Firebase configuration
         id: firebase_config
@@ -234,7 +248,7 @@ jobs:
           name: build-apk-log
           path: build-apk.log
 
-      - name: Verify debug APK and packaged Firebase resources
+      - name: Verify debug APK, Firebase resources, and signing certificate
         id: verify_apk
         shell: bash
         run: |
@@ -282,6 +296,65 @@ jobs:
             echo "Verified packaged in APK: string/${res_key}=PASS"
           done
           rm -f apk-resources.txt
+
+          APKSIGNER_BIN=$(find "${SDK_ROOT}/build-tools" -type f -name "apksigner" 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$APKSIGNER_BIN" ]; then
+            echo "ERROR: apksigner not found under ${SDK_ROOT}/build-tools to verify APK certificate."
+            exit 1
+          fi
+          CERT_OUT=$("$APKSIGNER_BIN" verify --print-certs "$APK_PATH")
+          APK_SHA1=$(printf '%s\n' "$CERT_OUT" | sed -n 's/.*SHA-1 digest:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')
+          APK_SHA256=$(printf '%s\n' "$CERT_OUT" | sed -n 's/.*SHA-256 digest:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')
+          echo "APK Signer #1 SHA-1: ${APK_SHA1}"
+          echo "APK Signer #1 SHA-256: ${APK_SHA256}"
+          python3 - "$APK_SHA1" <<'PY'
+          import json, sys
+          apk_sha1 = sys.argv[1].strip().lower()
+          with open("app/google-services.json", "r", encoding="utf-8-sig") as f:
+              data = json.load(f)
+          registered = {
+              oc.get("android_info", {}).get("certificate_hash", "").strip().lower()
+              for c in data.get("client", [])
+              for oc in c.get("oauth_client", [])
+              if oc.get("client_type") == 1
+          }
+          registered.discard("")
+          expected_sha1 = "14a3c6af07fcc2fef377141429cdb5ef20832505"
+          if apk_sha1 != expected_sha1 or apk_sha1 not in registered:
+              print(f"ERROR: APK signing SHA-1 ({apk_sha1}) does not match expected Firebase SHA-1 ({expected_sha1}) or registered google-services.json certs.", file=sys.stderr)
+              sys.exit(1)
+          print(f"Verified APK signing SHA-1 ({apk_sha1}) matches registered Firebase Android fingerprint.")
+          PY
+          echo "apk_sha1=${APK_SHA1}" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=${APK_SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Run unit and Robolectric tests
+        id: unit_tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_OPTS="-Xmx3g -Dfile.encoding=UTF-8" \
+          gradle :app:testDebugUnitTest \
+            -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8" \
+            --max-workers=2 \
+            --no-daemon \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ExampleUnitTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ExampleRobolectricTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.AuditScreensUiTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.gallery.ProjectGalleryScreenTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.publish.DirectPublishingUiTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.connect.ConnectWithUsTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.mixer.AudioMixerAndBilingualUiTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.create.AiLyricsGeneratorScreenTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.create.CreateScreenUiTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.ideas.IdeaGeneratorUiTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.ui.studio.PhotoSlideshowFeatureTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.media.AudioMixerEngineTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.media.ProAudioDspAndExportTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.media.ProVideoBrandingAndCodecTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.bilingual.BilingualGospelAndCuesTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.publishing.PublishingProtocolTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.ai.FirebaseAiLyricsAndFallbackTest"
 
       - name: Upload debug APK artifact
         id: upload_artifact
@@ -367,10 +440,12 @@ jobs:
           FIREBASE_OUTCOME="${{ steps.firebase_config.outcome }}"
           BUILD_OUTCOME="${{ steps.build_apk.outcome }}"
           VERIFY_OUTCOME="${{ steps.verify_apk.outcome }}"
+          TESTS_OUTCOME="${{ steps.unit_tests.outcome }}"
           ARTIFACT_OUTCOME="${{ steps.upload_artifact.outcome }}"
           RELEASE_OUTCOME="${{ steps.publish_release.outcome }}"
+          APK_SHA1="${{ steps.verify_apk.outputs.apk_sha1 }}"
 
-          if [ "$BUILD_OUTCOME" = "success" ] && [ "$VERIFY_OUTCOME" = "success" ] && [ "$ARTIFACT_OUTCOME" = "success" ] && [ "$RELEASE_OUTCOME" = "success" ]; then
+          if [ "$BUILD_OUTCOME" = "success" ] && [ "$VERIFY_OUTCOME" = "success" ] && [ "$TESTS_OUTCOME" = "success" ] && [ "$ARTIFACT_OUTCOME" = "success" ] && [ "$RELEASE_OUTCOME" = "success" ]; then
             RELEASE_URL=$(gh release view "$RELEASE_TAG" --json url -q .url)
             HAS_ASSET=$(gh release view "$RELEASE_TAG" --json assets -q '.assets[] | select(.name == "app-debug.apk") | .name')
             if [ -z "$HAS_ASSET" ]; then
@@ -389,6 +464,7 @@ jobs:
             echo "Release Title: ${RELEASE_TITLE}"
             echo "Release Page URL: ${RELEASE_URL}"
             echo "APK Filename: app-debug.apk"
+            echo "APK Signing SHA-1: ${APK_SHA1}"
             echo "Firebase Packaged Verification: PASS"
             echo "DIRECT APK DOWNLOAD: ${DIRECT_URL}"
 
@@ -401,12 +477,14 @@ jobs:
               echo "- **Release Title:** ${RELEASE_TITLE}"
               echo "- **GitHub Run:** #${GITHUB_RUN_NUMBER} (attempt ${GITHUB_RUN_ATTEMPT})"
               echo "- **Commit SHA:** \`${GITHUB_SHA}\`"
+              echo "- **APK Signing SHA-1:** \`${APK_SHA1}\`"
               echo "- **Firebase Config Packaged in APK:** PASS"
+              echo "- **Unit & Robolectric Tests:** PASS"
               echo "- **APK Filename:** \`app-debug.apk\`"
               echo ""
               echo "You can download the APK from the release **Assets** section on the release page above. The normal Actions artifact (\`app-debug-apk\`) is also available as a backup."
             } >> "$GITHUB_STEP_SUMMARY"
-          elif [ "$BUILD_OUTCOME" = "success" ] && [ "$VERIFY_OUTCOME" = "success" ] && [ "$ARTIFACT_OUTCOME" = "success" ]; then
+          elif [ "$BUILD_OUTCOME" = "success" ] && [ "$VERIFY_OUTCOME" = "success" ] && [ "$TESTS_OUTCOME" = "success" ] && [ "$ARTIFACT_OUTCOME" = "success" ]; then
             echo "WARNING: GitHub Release publishing failed (outcome: ${RELEASE_OUTCOME})."
             echo "The APK build succeeded and the Actions artifact named 'app-debug-apk' remains available."
             {
@@ -414,25 +492,35 @@ jobs:
               echo ""
               echo "WARNING: GitHub Release publishing failed for tag \`${RELEASE_TAG}\`, so no release URL was published."
               echo ""
-              echo "The APK build succeeded with verified Firebase resources, and the Actions artifact named \`app-debug-apk\` remains available as a backup."
+              echo "The APK build succeeded with verified Firebase resources and signing SHA-1 (\`${APK_SHA1}\`), and the Actions artifact named \`app-debug-apk\` remains available."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "WARNING: Debug APK build or verification failed (sdk=${SDK_OUTCOME}, gradle=${GRADLE_OUTCOME}, keystore=${KEYSTORE_OUTCOME}, firebase=${FIREBASE_OUTCOME}, build=${BUILD_OUTCOME}, verify=${VERIFY_OUTCOME}, artifact=${ARTIFACT_OUTCOME}). No release was published."
+            echo "WARNING: Debug APK build or verification failed (sdk=${SDK_OUTCOME}, gradle=${GRADLE_OUTCOME}, keystore=${KEYSTORE_OUTCOME}, firebase=${FIREBASE_OUTCOME}, build=${BUILD_OUTCOME}, verify=${VERIFY_OUTCOME}, tests=${TESTS_OUTCOME}, artifact=${ARTIFACT_OUTCOME}). No release was published."
             {
               echo "## Debug APK Build Failed"
               echo ""
-              echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`firebase=${FIREBASE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
+              echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`firebase=${FIREBASE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`tests=${TESTS_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
               echo ""
+              if [ "$KEYSTORE_OUTCOME" != "success" ]; then
+                echo "### Missing Persistent Debug Keystore (\`DEBUG_KEYSTORE_B64\`)"
+                echo ""
+                echo "GitHub Actions refused to generate a random temporary debug keystore because neither \`DEBUG_KEYSTORE_B64\` secret nor \`debug.keystore.base64\` was valid."
+                echo ""
+                echo "To fix this on GitHub:"
+                echo "1. Open your repository **Settings -> Secrets and variables -> Actions -> New repository secret**."
+                echo "2. Name it \`DEBUG_KEYSTORE_B64\` and paste the base64 contents of the project's \`debug.keystore.base64\`."
+                echo "3. Re-run this workflow."
+                echo ""
+              fi
               if [ "$FIREBASE_OUTCOME" != "success" ]; then
                 echo "### Missing Firebase Configuration (\`app/google-services.json\`)"
                 echo ""
                 echo "GitHub Actions could not find \`app/google-services.json\` in the repository checkout and no valid \`GOOGLE_SERVICES_JSON\` or \`GOOGLE_SERVICES_JSON_B64\` repository secret was provided."
                 echo ""
                 echo "To fix this on GitHub:"
-                echo "1. Open your repository **Settings -> Secrets and variables -> Actions**."
-                echo "2. Click **New repository secret**."
-                echo "3. Name it \`GOOGLE_SERVICES_JSON\` and paste the JSON contents of \`app/google-services.json\` (for project \`gen-lang-client-0518223416\` / package \`com.aistudio.aimusic.wltv.jqr8x\`)."
-                echo "4. Re-run this workflow."
+                echo "1. Open your repository **Settings -> Secrets and variables -> Actions -> New repository secret**."
+                echo "2. Name it \`GOOGLE_SERVICES_JSON\` and paste the JSON contents of \`app/google-services.json\` (for project \`gen-lang-client-0518223416\` / package \`com.aistudio.aimusic.wltv.jqr8x\`)."
+                echo "3. Re-run this workflow."
                 echo ""
               fi
               if [ -f "build-apk.log" ]; then

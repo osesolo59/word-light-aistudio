@@ -13,6 +13,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -348,14 +349,30 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                     .fillMaxWidth()
                     .widthIn(max = 480.dp)
             ) {
+                SelectionContainer {
+                    Text(
+                        text = errorMessage!!,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .testTag("auth_error_text")
+                    )
+                }
+            }
+        }
+
+        val appSha1 = remember(context) { getAppSigningSha1(context) }
+        if (appSha1 != null) {
+            Spacer(modifier = Modifier.height(20.dp))
+            SelectionContainer {
                 Text(
-                    text = errorMessage!!,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    text = "App Signing SHA-1: $appSha1",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier
-                        .padding(12.dp)
-                        .testTag("auth_error_text")
+                    modifier = Modifier.testTag("auth_signing_sha1")
                 )
             }
         }
@@ -630,7 +647,11 @@ internal fun formatGoogleAuthError(
 ): String {
     val rawMessage = error.localizedMessage ?: error.message ?: "Sign-in failed"
     val normalized = rawMessage.lowercase()
-    val isDeveloperConfigError = codeOverride == CommonStatusCodes.DEVELOPER_ERROR ||
+    val isCertHashError = (error is FirebaseAuthException && error.errorCode == "ERROR_INVALID_CERT_HASH") ||
+        normalized.contains("certificate hash") ||
+        normalized.contains("invalid_cert_hash")
+    val isDeveloperConfigError = isCertHashError ||
+        codeOverride == CommonStatusCodes.DEVELOPER_ERROR ||
         normalized.contains("10:") ||
         normalized.contains("developer_error") ||
         normalized.contains("developer console") ||
@@ -640,8 +661,12 @@ internal fun formatGoogleAuthError(
     return when {
         isDeveloperConfigError -> {
             val sha1 = getAppSigningSha1(context)
-            val sha1Hint = if (sha1 != null) " Installed APK SHA-1: $sha1." else ""
-            "Google Sign-In configuration error (${codeOverride ?: "10"}). Verify Google Sign-In is enabled in Firebase Authentication and this app's SHA-1 is registered in Firebase Project Settings.$sha1Hint"
+            val sha256 = getAppSigningSha256(context)
+            val fingerprintInfo = buildString {
+                if (sha1 != null) append(" Installed APK SHA-1: $sha1.")
+                if (sha256 != null) append(" SHA-256: $sha256.")
+            }
+            "This APK's signing certificate (SHA-1 / SHA-256) is not registered in Firebase Console for ${context.packageName}. Add the fingerprint in Firebase Console (gen-lang-client-0518223416 -> Project Settings -> Your apps) and ensure Google Sign-In is enabled.$fingerprintInfo"
         }
         error is FirebaseAuthException && error.errorCode == "ERROR_OPERATION_NOT_ALLOWED" ->
             "Google Sign-In provider is disabled in Firebase Authentication Console. Enable Google under Authentication -> Sign-in method."
@@ -658,7 +683,13 @@ internal fun formatGoogleAuthError(
     }
 }
 
-internal fun getAppSigningSha1(context: Context): String? {
+internal fun getAppSigningSha1(context: Context): String? =
+    getAppSigningDigest(context, "SHA-1")
+
+internal fun getAppSigningSha256(context: Context): String? =
+    getAppSigningDigest(context, "SHA-256")
+
+private fun getAppSigningDigest(context: Context, algorithm: String): String? {
     return try {
         val pm = context.packageManager
         val pkgName = context.packageName
@@ -671,7 +702,7 @@ internal fun getAppSigningSha1(context: Context): String? {
             pm.getPackageInfo(pkgName, PackageManager.GET_SIGNATURES).signatures
         }
         val certBytes = signatures?.firstOrNull()?.toByteArray() ?: return null
-        val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+        val digest = MessageDigest.getInstance(algorithm).digest(certBytes)
         digest.joinToString(":") { "%02X".format(it) }
     } catch (_: Exception) {
         null
