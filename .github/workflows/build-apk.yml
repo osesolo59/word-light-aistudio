@@ -105,7 +105,7 @@ jobs:
 
       - name: Set up Gradle 9.3.1
         id: setup_gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.3.1"
 
@@ -157,7 +157,19 @@ jobs:
           mkdir -p app
           if [ ! -s "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
             echo "Restoring app/google-services.json from GOOGLE_SERVICES_JSON secret..."
-            printf '%s' "$GOOGLE_SERVICES_JSON" > "app/google-services.json"
+            python3 - <<'PY'
+          import base64, os
+          raw = os.environ.get("GOOGLE_SERVICES_JSON", "").lstrip("\ufeff").strip()
+          if raw and not raw.startswith("{"):
+              try:
+                  decoded = base64.b64decode("".join(raw.split()), validate=True).decode("utf-8-sig").strip()
+                  if decoded.startswith("{"):
+                      raw = decoded
+              except Exception:
+                  pass
+          with open("app/google-services.json", "w", encoding="utf-8") as f:
+              f.write(raw)
+          PY
           fi
           if [ ! -s "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON_B64:-}" ]; then
             echo "Decoding app/google-services.json from GOOGLE_SERVICES_JSON_B64 secret..."
@@ -166,13 +178,18 @@ jobs:
             fi
           fi
           if [ ! -s "app/google-services.json" ]; then
-            echo "ERROR: app/google-services.json is missing. Add app/google-services.json to the repository or set the GOOGLE_SERVICES_JSON (or GOOGLE_SERVICES_JSON_B64) repository secret."
+            echo "ERROR: app/google-services.json is missing from the GitHub repository checkout and neither GOOGLE_SERVICES_JSON nor GOOGLE_SERVICES_JSON_B64 secret is set."
+            echo "FIX: Add a GitHub Actions Repository Secret named GOOGLE_SERVICES_JSON containing app/google-services.json, then re-run the workflow."
             exit 1
           fi
           python3 - <<'PY'
           import json, sys
-          with open("app/google-services.json", "r", encoding="utf-8") as f:
-              data = json.load(f)
+          try:
+              with open("app/google-services.json", "r", encoding="utf-8-sig") as f:
+                  data = json.load(f)
+          except Exception as exc:
+              print(f"ERROR: app/google-services.json is not valid JSON ({type(exc).__name__}).", file=sys.stderr)
+              sys.exit(1)
           project_id = data.get("project_info", {}).get("project_id", "")
           clients = data.get("client", [])
           matched = False
@@ -187,7 +204,11 @@ jobs:
                   if oc.get("client_type") == 3:
                       has_web_client = True
           if project_id != "gen-lang-client-0518223416" or not matched or not has_web_client:
-              print("ERROR: app/google-services.json does not match expected project, package, or OAuth configuration.", file=sys.stderr)
+              print(
+                  f"ERROR: app/google-services.json mismatch (project_match={project_id == 'gen-lang-client-0518223416'}, "
+                  f"client_match={matched}, web_oauth={has_web_client}).",
+                  file=sys.stderr,
+              )
               sys.exit(1)
           print(f"Verified app/google-services.json for project={project_id}, package=com.aistudio.aimusic.wltv.jqr8x, webOAuth={has_web_client}")
           PY
@@ -402,6 +423,18 @@ jobs:
               echo ""
               echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`firebase=${FIREBASE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
               echo ""
+              if [ "$FIREBASE_OUTCOME" != "success" ]; then
+                echo "### Missing Firebase Configuration (\`app/google-services.json\`)"
+                echo ""
+                echo "GitHub Actions could not find \`app/google-services.json\` in the repository checkout and no valid \`GOOGLE_SERVICES_JSON\` or \`GOOGLE_SERVICES_JSON_B64\` repository secret was provided."
+                echo ""
+                echo "To fix this on GitHub:"
+                echo "1. Open your repository **Settings -> Secrets and variables -> Actions**."
+                echo "2. Click **New repository secret**."
+                echo "3. Name it \`GOOGLE_SERVICES_JSON\` and paste the JSON contents of \`app/google-services.json\` (for project \`gen-lang-client-0518223416\` / package \`com.aistudio.aimusic.wltv.jqr8x\`)."
+                echo "4. Re-run this workflow."
+                echo ""
+              fi
               if [ -f "build-apk.log" ]; then
                 echo "### Compiler / Build Error Lines"
                 echo '```text'
