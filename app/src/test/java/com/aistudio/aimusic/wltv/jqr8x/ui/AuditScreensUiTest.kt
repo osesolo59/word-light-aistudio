@@ -203,6 +203,7 @@ class AuditScreensUiTest {
         composeRule.onNodeWithText("WORD & LIGHT AI STUDIO").assertIsDisplayed()
         composeRule.onNodeWithTag("google_sign_in_button").assertIsDisplayed()
         composeRule.onNodeWithText("Continue with Google").assertIsDisplayed()
+        composeRule.onNodeWithTag("browser_google_sign_in_button").assertIsDisplayed()
         composeRule.onNodeWithTag("legacy_google_sign_in_button").assertIsDisplayed()
 
         val devErrorMsg = formatGoogleAuthError(

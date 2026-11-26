@@ -12,6 +12,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,6 +49,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +67,44 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
 
+    val launchBrowserGoogleSignIn: () -> Unit = {
+        val activity = context.findActivity()
+        if (activity == null) {
+            isLoading = false
+            errorMessage = "Unable to find Activity context for browser Google Sign-In."
+        } else if (runCatching { FirebaseApp.getInstance() }.isFailure) {
+            isLoading = false
+            errorMessage = "Firebase is not initialized in this build."
+        } else {
+            scope.launch {
+                try {
+                    val provider = OAuthProvider.newBuilder("google.com")
+                        .addCustomParameter("prompt", "select_account")
+                        .build()
+                    val pendingTask = Firebase.auth.pendingAuthResult
+                    val authResult = if (pendingTask != null) {
+                        pendingTask.await()
+                    } else {
+                        Firebase.auth.startActivityForSignInWithProvider(activity, provider).await()
+                    }
+                    if (authResult.user != null || Firebase.auth.currentUser != null) {
+                        isLoading = false
+                        onAuthSuccess()
+                    } else {
+                        isLoading = false
+                        errorMessage = "Google browser sign-in finished without an active user session. Please try again."
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    isLoading = false
+                    Log.e("Auth", "Browser Google Sign-In failed", e)
+                    errorMessage = formatGoogleAuthError(context, e)
+                }
+            }
+        }
+    }
+
     val legacySignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { activityResult ->
@@ -74,9 +115,9 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                 errorMessage = "Unable to find Activity context after Google Sign-In."
                 return@launch
             }
-            if (activityResult.resultCode != Activity.RESULT_OK && activityResult.data == null) {
+            if (activityResult.data == null) {
                 isLoading = false
-                errorMessage = "Sign-in was cancelled. Tap Continue with Google to try again."
+                errorMessage = "Google sign-in dialog closed (resultCode=${activityResult.resultCode}). Tap \"Sign in with Google in Browser\" below to continue."
                 return@launch
             }
             try {
@@ -86,7 +127,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                 val idToken = credential.googleIdToken
                 if (idToken.isNullOrBlank()) {
                     isLoading = false
-                    errorMessage = "Google account did not return an ID token. Please verify Web Client ID configuration."
+                    errorMessage = "Google account did not return an ID token. Tap \"Sign in with Google in Browser\" below."
                     return@launch
                 }
                 val authCredential = GoogleAuthProvider.getCredential(idToken, null)
@@ -96,11 +137,19 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ApiException) {
-                isLoading = false
+                val msg = e.localizedMessage ?: e.message.orEmpty()
                 if (e.statusCode == CommonStatusCodes.CANCELED) {
-                    Log.w("Auth", "Classic Google Sign-In cancelled (${e.statusCode})")
-                    errorMessage = "Sign-in was cancelled. Tap Continue with Google to try again."
+                    Log.w("Auth", "Classic Google Sign-In returned CANCELED (${e.statusCode}): $msg")
+                    val lower = msg.lowercase()
+                    if (lower.contains("blocked") || lower.contains("cannot find") || lower.contains("reauth")) {
+                        launchBrowserGoogleSignIn()
+                    } else {
+                        isLoading = false
+                        val detail = if (msg.isNotBlank()) " ($msg)" else ""
+                        errorMessage = "Google Play Services sign-in was cancelled$detail. Try \"Sign in with Google in Browser\" below."
+                    }
                 } else {
+                    isLoading = false
                     Log.e("Auth", "Classic Google Sign-In failed with code ${e.statusCode}", e)
                     errorMessage = formatGoogleAuthError(context, e, codeOverride = e.statusCode)
                 }
@@ -113,6 +162,22 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
+        if (runCatching { FirebaseApp.getInstance() }.isSuccess) {
+            val pendingTask = runCatching { Firebase.auth.pendingAuthResult }.getOrNull()
+            if (pendingTask != null) {
+                try {
+                    val result = pendingTask.await()
+                    if (result.user != null) {
+                        onAuthSuccess()
+                        return@LaunchedEffect
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("Auth", "Pending browser sign-in did not complete", e)
+                }
+            }
+        }
         attemptAutoSignIn(
             context = context,
             credentialManager = credentialManager,
@@ -136,8 +201,8 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
             if (playServicesStatus != ConnectionResult.SUCCESS &&
                 !GoogleApiAvailability.getInstance().isUserResolvableError(playServicesStatus)
             ) {
-                isLoading = false
-                errorMessage = "Google Play Services is not available on this device (status=$playServicesStatus)."
+                Log.w("Auth", "Google Play Services unavailable (status=$playServicesStatus); using browser sign-in.")
+                launchBrowserGoogleSignIn()
             } else {
                 scope.launch {
                     try {
@@ -155,13 +220,16 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: ApiException) {
-                        isLoading = false
-                        Log.e("Auth", "Failed to start classic Google Sign-In (${e.statusCode})", e)
-                        errorMessage = formatGoogleAuthError(context, e, codeOverride = e.statusCode)
+                        Log.w("Auth", "Failed to start classic GIS sign-in (${e.statusCode}); falling back to browser sign-in", e)
+                        if (e.statusCode == CommonStatusCodes.DEVELOPER_ERROR) {
+                            isLoading = false
+                            errorMessage = formatGoogleAuthError(context, e, codeOverride = e.statusCode)
+                        } else {
+                            launchBrowserGoogleSignIn()
+                        }
                     } catch (e: Exception) {
-                        isLoading = false
-                        Log.e("Auth", "Failed to start classic Google Sign-In", e)
-                        errorMessage = formatGoogleAuthError(context, e)
+                        Log.w("Auth", "Failed to start classic GIS sign-in; falling back to browser sign-in", e)
+                        launchBrowserGoogleSignIn()
                     }
                 }
             }
@@ -171,6 +239,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -196,7 +265,7 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
             textAlign = TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(40.dp))
 
         GoogleSignInButton(
             isLoading = isLoading,
@@ -218,14 +287,38 @@ fun AuthScreen(onAuthSuccess: () -> Unit) {
                     scope = scope,
                     onAuthCancelled = {
                         isLoading = false
-                        errorMessage = "Sign-in was dismissed. Tap Continue with Google or try the classic Google account picker below."
+                        errorMessage = "Google prompt was dismissed. Tap \"Sign in with Google in Browser\" below if your device keeps cancelling the prompt."
                     },
-                    onFallbackToLegacySignIn = launchClassicGoogleSignIn
+                    onFallbackToLegacySignIn = launchClassicGoogleSignIn,
+                    onFallbackToBrowserSignIn = launchBrowserGoogleSignIn
                 )
             }
         )
 
         Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = {
+                if (isLoading) return@OutlinedButton
+                errorMessage = null
+                isLoading = true
+                launchBrowserGoogleSignIn()
+            },
+            enabled = !isLoading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 480.dp)
+                .height(48.dp)
+                .testTag("browser_google_sign_in_button"),
+            shape = MaterialTheme.shapes.medium
+        ) {
+            Text(
+                text = "Sign in with Google in Browser",
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
 
         TextButton(
             onClick = {
@@ -357,7 +450,8 @@ fun onGoogleSignInClicked(
     onAuthError: (String) -> Unit,
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit,
-    onFallbackToLegacySignIn: (() -> Unit)? = null
+    onFallbackToLegacySignIn: (() -> Unit)? = null,
+    onFallbackToBrowserSignIn: (() -> Unit)? = null
 ) {
     val clientId = resolveWebClientId(context)
     if (clientId.isEmpty()) {
@@ -394,59 +488,82 @@ fun onGoogleSignInClicked(
                 handleCredentialResult(result.credential, onAuthSuccess, onAuthError)
             } catch (fallbackEx: GetCredentialCancellationException) {
                 Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${fallbackEx.message}", fallbackEx)
-                if (shouldTriggerLegacyFallbackOnCancel(fallbackEx) && onFallbackToLegacySignIn != null) {
-                    onFallbackToLegacySignIn()
-                } else if (isConfigErrorMessage(fallbackEx.message)) {
-                    onAuthError(formatGoogleAuthError(context, fallbackEx))
-                } else {
-                    onAuthCancelled()
-                }
+                handleCancellationException(
+                    context = context,
+                    exception = fallbackEx,
+                    onAuthError = onAuthError,
+                    onAuthCancelled = onAuthCancelled,
+                    onFallbackToBrowserSignIn = onFallbackToBrowserSignIn,
+                    onFallbackToLegacySignIn = onFallbackToLegacySignIn
+                )
             } catch (ce: CancellationException) {
                 throw ce
             } catch (fallbackEx: Exception) {
-                Log.w("Auth", "CredentialManager fallback failed; attempting classic GIS sign-in", fallbackEx)
-                if (onFallbackToLegacySignIn != null && shouldFallbackToLegacy(fallbackEx)) {
-                    onFallbackToLegacySignIn()
-                } else {
-                    onAuthError(formatGoogleAuthError(context, fallbackEx))
+                Log.w("Auth", "CredentialManager fallback failed; attempting fallback sign-in", fallbackEx)
+                when {
+                    onFallbackToLegacySignIn != null && shouldFallbackToLegacy(fallbackEx) ->
+                        onFallbackToLegacySignIn()
+                    onFallbackToBrowserSignIn != null && shouldFallbackToLegacy(fallbackEx) ->
+                        onFallbackToBrowserSignIn()
+                    else -> onAuthError(formatGoogleAuthError(context, fallbackEx))
                 }
             }
         } catch (e: GetCredentialCancellationException) {
             Log.w("Auth", "Google Sign-In flow cancelled or dismissed: ${e.message}", e)
-            if (shouldTriggerLegacyFallbackOnCancel(e) && onFallbackToLegacySignIn != null) {
-                onFallbackToLegacySignIn()
-            } else if (isConfigErrorMessage(e.message)) {
-                onAuthError(formatGoogleAuthError(context, e))
-            } else {
-                onAuthCancelled()
-            }
+            handleCancellationException(
+                context = context,
+                exception = e,
+                onAuthError = onAuthError,
+                onAuthCancelled = onAuthCancelled,
+                onFallbackToBrowserSignIn = onFallbackToBrowserSignIn,
+                onFallbackToLegacySignIn = onFallbackToLegacySignIn
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: GetCredentialProviderConfigurationException) {
-            Log.w("Auth", "Credential provider unavailable on device; falling back to classic GIS sign-in", e)
-            if (onFallbackToLegacySignIn != null) {
-                onFallbackToLegacySignIn()
-            } else {
-                onAuthError(formatGoogleAuthError(context, e))
+            Log.w("Auth", "Credential provider unavailable on device; falling back", e)
+            when {
+                onFallbackToLegacySignIn != null -> onFallbackToLegacySignIn()
+                onFallbackToBrowserSignIn != null -> onFallbackToBrowserSignIn()
+                else -> onAuthError(formatGoogleAuthError(context, e))
             }
         } catch (e: GetCredentialUnsupportedException) {
-            Log.w("Auth", "CredentialManager unsupported on device; falling back to classic GIS sign-in", e)
-            if (onFallbackToLegacySignIn != null) {
-                onFallbackToLegacySignIn()
-            } else {
-                onAuthError(formatGoogleAuthError(context, e))
+            Log.w("Auth", "CredentialManager unsupported on device; falling back", e)
+            when {
+                onFallbackToLegacySignIn != null -> onFallbackToLegacySignIn()
+                onFallbackToBrowserSignIn != null -> onFallbackToBrowserSignIn()
+                else -> onAuthError(formatGoogleAuthError(context, e))
             }
         } catch (e: GetCredentialException) {
             Log.w("Auth", "CredentialManager GetCredentialException; checking fallback", e)
-            if (onFallbackToLegacySignIn != null && shouldFallbackToLegacy(e)) {
-                onFallbackToLegacySignIn()
-            } else {
-                onAuthError(formatGoogleAuthError(context, e))
+            when {
+                onFallbackToLegacySignIn != null && shouldFallbackToLegacy(e) -> onFallbackToLegacySignIn()
+                onFallbackToBrowserSignIn != null && shouldFallbackToLegacy(e) -> onFallbackToBrowserSignIn()
+                else -> onAuthError(formatGoogleAuthError(context, e))
             }
         } catch (e: Exception) {
             Log.e("Auth", "Google Sign-In failed", e)
             onAuthError(formatGoogleAuthError(context, e))
         }
+    }
+}
+
+private fun handleCancellationException(
+    context: Context,
+    exception: GetCredentialCancellationException,
+    onAuthError: (String) -> Unit,
+    onAuthCancelled: () -> Unit,
+    onFallbackToBrowserSignIn: (() -> Unit)?,
+    onFallbackToLegacySignIn: (() -> Unit)?
+) {
+    when {
+        isConfigErrorMessage(exception.message) ->
+            onAuthError(formatGoogleAuthError(context, exception))
+        shouldTriggerFallbackOnCancel(exception) && onFallbackToBrowserSignIn != null ->
+            onFallbackToBrowserSignIn()
+        shouldTriggerFallbackOnCancel(exception) && onFallbackToLegacySignIn != null ->
+            onFallbackToLegacySignIn()
+        else -> onAuthCancelled()
     }
 }
 
@@ -490,7 +607,7 @@ private fun isConfigErrorMessage(message: String?): Boolean {
         m.contains("client_id")
 }
 
-private fun shouldTriggerLegacyFallbackOnCancel(e: GetCredentialCancellationException): Boolean {
+private fun shouldTriggerFallbackOnCancel(e: GetCredentialCancellationException): Boolean {
     val m = e.message?.lowercase().orEmpty()
     return m.contains("blocked") ||
         m.contains("reauth") ||
