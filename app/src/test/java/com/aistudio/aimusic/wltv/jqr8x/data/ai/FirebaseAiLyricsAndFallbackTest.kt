@@ -7,7 +7,9 @@ import com.aistudio.aimusic.wltv.jqr8x.data.model.CreativeIdea
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
 import com.aistudio.aimusic.wltv.jqr8x.ui.create.LyricsUiState
 import com.aistudio.aimusic.wltv.jqr8x.ui.create.LyricsViewModel
+import com.aistudio.aimusic.wltv.jqr8x.ui.create.lyricsErrorHeadline
 import com.aistudio.aimusic.wltv.jqr8x.ui.ideas.IdeaGeneratorViewModel
+import com.aistudio.aimusic.wltv.jqr8x.util.AppCheckStatus
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.ai.type.APINotConfiguredException
@@ -665,5 +667,73 @@ class FirebaseAiLyricsAndFallbackTest {
         val state = viewModel.uiState.value
         assertTrue("Incomplete stream must fail honestly with Retry", state is LyricsUiState.Error)
         assertTrue((state as LyricsUiState.Error).message.contains("Retry"))
+    }
+
+    @Test
+    fun mapAiException_distinguishesAllFiveFailureCategoriesAndUiHeadlines() {
+        val readyDebugStatus = AppCheckStatus(
+            initialized = true,
+            initializedBeforeAi = true,
+            providerName = "DebugAppCheckProviderFactory",
+            isDebugBuild = true,
+            tokenCheckAttempted = true,
+            tokenObtained = true
+        )
+
+        // 1. App Check token missing
+        val missingToken = FirebaseAiTextGenerator.mapAiException(
+            error = sdkError<PermissionMissingException>("HTTP 403 No AppCheckProvider installed"),
+            appCheckStatus = AppCheckStatus(initialized = false)
+        )
+        assertEquals("APP_CHECK_TOKEN_MISSING", missingToken.diagnosticCode)
+        assertEquals(
+            "App Check Token Missing",
+            lyricsErrorHeadline(missingToken.reason, missingToken.diagnosticCode)
+        )
+
+        // 2. App Check attestation failed
+        val attestationFailed = FirebaseAiTextGenerator.mapAiException(
+            error = Exception("HTTP 403 Error returned from API: App attestation failed"),
+            appCheckStatus = readyDebugStatus.copy(tokenObtained = false, lastTokenError = "403 App attestation failed")
+        )
+        assertEquals("APP_CHECK_ATTESTATION_FAILED", attestationFailed.diagnosticCode)
+        assertTrue(attestationFailed.message!!.contains("Logcat (tag: AppCheckInit)"))
+        assertEquals(
+            "App Check Attestation Failed",
+            lyricsErrorHeadline(attestationFailed.reason, attestationFailed.diagnosticCode)
+        )
+
+        // 3. Firebase permission denied (token present, backend denied permission)
+        val permissionDenied = FirebaseAiTextGenerator.mapAiException(
+            error = sdkError<PermissionMissingException>("HTTP 403 PERMISSION_DENIED: Caller does not have permission"),
+            appCheckStatus = readyDebugStatus
+        )
+        assertEquals("FIREBASE_PERMISSION_DENIED", permissionDenied.diagnosticCode)
+        assertEquals(
+            "Firebase Permission Denied",
+            lyricsErrorHeadline(permissionDenied.reason, permissionDenied.diagnosticCode)
+        )
+
+        // 4. Network unavailable
+        val networkUnavailable = FirebaseAiTextGenerator.mapAiException(
+            error = UnknownHostException("Unable to resolve host"),
+            appCheckStatus = readyDebugStatus
+        )
+        assertEquals("NETWORK_ERROR", networkUnavailable.diagnosticCode)
+        assertEquals(
+            "Network Unavailable",
+            lyricsErrorHeadline(networkUnavailable.reason, networkUnavailable.diagnosticCode)
+        )
+
+        // 5. Gemini generation failure
+        val geminiFailure = FirebaseAiTextGenerator.mapAiException(
+            error = sdkError<ServerException>("HTTP 503 Backend overloaded"),
+            appCheckStatus = readyDebugStatus
+        )
+        assertEquals(
+            "Gemini Generation Failure",
+            lyricsErrorHeadline(geminiFailure.reason, geminiFailure.diagnosticCode)
+        )
+        assertTrue(geminiFailure.message!!.contains("Gemini generation failure"))
     }
 }

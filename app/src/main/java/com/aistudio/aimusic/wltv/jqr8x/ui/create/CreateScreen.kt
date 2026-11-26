@@ -1007,8 +1007,14 @@ fun CustomModeScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Text(
+                        text = lyricsErrorHeadline(lyricsState.reason, lyricsState.diagnosticCode),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(
                         text = lyricsState.message,
                         color = MaterialTheme.colorScheme.onErrorContainer,

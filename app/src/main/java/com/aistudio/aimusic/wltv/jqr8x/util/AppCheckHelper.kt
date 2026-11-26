@@ -3,68 +3,118 @@ package com.aistudio.aimusic.wltv.jqr8x.util
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import com.aistudio.aimusic.wltv.jqr8x.BuildConfig
 import com.google.firebase.FirebaseApp
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
-import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
 
 private const val TAG = "AppCheckInit"
 private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
-private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
-private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
-private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
+
+data class AppCheckStatus(
+    val initialized: Boolean = false,
+    val initializedBeforeAi: Boolean = true,
+    val providerName: String = "Uninitialized",
+    val isDebugBuild: Boolean = BuildConfig.DEBUG,
+    val launchExtraProvided: Boolean = false,
+    val tokenCheckAttempted: Boolean = false,
+    val tokenObtained: Boolean = false,
+    val lastInitError: String? = null,
+    val lastTokenError: String? = null
+)
+
+object AppCheckDiagnostics {
+    @Volatile
+    var status: AppCheckStatus = AppCheckStatus()
+        private set
+
+    @Volatile
+    private var installedAppName: String? = null
+
+    internal fun shouldInstall(firebaseAppName: String, hasDebugExtra: Boolean): Boolean =
+        !status.initialized || installedAppName != firebaseAppName || (BuildConfig.DEBUG && hasDebugExtra)
+
+    internal fun recordInstalled(
+        firebaseAppName: String,
+        providerName: String,
+        launchExtraProvided: Boolean
+    ) {
+        installedAppName = firebaseAppName
+        val prior = status
+        status = prior.copy(
+            initialized = true,
+            providerName = providerName,
+            isDebugBuild = BuildConfig.DEBUG,
+            launchExtraProvided = launchExtraProvided,
+            lastInitError = null
+        )
+    }
+
+    internal fun recordTokenResult(tokenObtained: Boolean, errorDetail: String?) {
+        status = status.copy(
+            tokenCheckAttempted = true,
+            tokenObtained = tokenObtained,
+            lastTokenError = errorDetail
+        )
+    }
+
+    internal fun recordInitError(errorDetail: String) {
+        status = status.copy(
+            initialized = false,
+            lastInitError = errorDetail
+        )
+    }
+
+    fun markAiRequested() {
+        if (!status.initialized) {
+            status = status.copy(initializedBeforeAi = false)
+        }
+    }
+
+    @VisibleForTesting
+    internal fun resetForTest() {
+        installedAppName = null
+        status = AppCheckStatus()
+    }
+}
 
 fun configureAppCheck(context: Context, intent: Intent?) {
     try {
-        if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
-        }
-
-        if (BuildConfig.DEBUG) {
-            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
-            val launchExtraProvided = !debugToken.isNullOrEmpty()
-
-            if (launchExtraProvided) {
-                val persistenceKey = FirebaseApp.getInstance().persistenceKey
-                val prefs = context.getSharedPreferences(
-                    "$DEBUG_STORE_PREFIX$persistenceKey",
-                    Context.MODE_PRIVATE
-                )
-                prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
-                    .commit()
-                Log.d(TAG, "App Check debug secret configured from launch Intent.")
+        val firebaseApp = runCatching { FirebaseApp.getInstance() }.getOrElse {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
             } else {
-                // On a physical debug phone launched normally, DebugAppCheckProviderFactory creates/uses
-                // a local debug secret UUID printed once in Logcat ("Enter this debug secret...").
-                Log.w(
-                    TAG,
-                    "No launch debug token extra; DebugAppCheckProviderFactory will use local device debug secret."
-                )
-            }
-
-            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                DebugAppCheckProviderFactory.getInstance()
-            )
-            Log.d(TAG, "DebugAppCheckProviderFactory installed (launchExtraProvided=$launchExtraProvided).")
-        } else {
-            val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
-            val siteKey = if (resId != 0) context.getString(resId).trim() else ""
-            if (siteKey.isNotBlank()) {
-                FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                    RecaptchaAppCheckProviderFactory.getInstance(siteKey)
-                )
-                Log.d(TAG, "Release App Check provider installed: Recaptcha.")
-            } else {
-                FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-                    PlayIntegrityAppCheckProviderFactory.getInstance()
-                )
-                Log.d(TAG, "Release App Check provider installed: PlayIntegrity.")
+                FirebaseApp.getApps(context).firstOrNull()
             }
         }
+        if (firebaseApp == null) {
+            val detail = "FirebaseApp is not configured (google-services.json missing)"
+            Log.e(TAG, detail)
+            AppCheckDiagnostics.recordInitError(detail)
+            return
+        }
+
+        val hasDebugExtra = !intent?.getStringExtra(DEBUG_TOKEN_EXTRA).isNullOrBlank()
+        if (!AppCheckDiagnostics.shouldInstall(firebaseApp.name, hasDebugExtra)) {
+            Log.d(TAG, "App Check already initialized (${AppCheckDiagnostics.status.providerName}); skipping duplicate setup.")
+            return
+        }
+
+        val launchExtraProvided = AppCheckProviderInstaller.install(
+            context = context,
+            firebaseApp = firebaseApp,
+            intent = intent,
+            onTokenCheckResult = { tokenObtained, errorDetail ->
+                AppCheckDiagnostics.recordTokenResult(tokenObtained, errorDetail)
+            }
+        )
+        AppCheckDiagnostics.recordInstalled(
+            firebaseAppName = firebaseApp.name,
+            providerName = AppCheckProviderInstaller.PROVIDER_NAME,
+            launchExtraProvided = launchExtraProvided
+        )
     } catch (e: Exception) {
-        Log.e(TAG, "Failed to initialize Firebase App Check: ${e::class.java.simpleName}")
+        val safeMsg = e.message?.take(160) ?: e::class.java.simpleName
+        Log.e(TAG, "Failed to initialize Firebase App Check: ${e::class.java.simpleName}", e)
+        AppCheckDiagnostics.recordInitError(safeMsg)
     }
 }

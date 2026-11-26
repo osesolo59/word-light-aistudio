@@ -5,6 +5,8 @@ import com.aistudio.aimusic.wltv.jqr8x.data.demo.IdeaGeneratorEngine
 import com.aistudio.aimusic.wltv.jqr8x.data.model.CreativeIdea
 import com.aistudio.aimusic.wltv.jqr8x.data.bilingual.BilingualGospelHelper
 import com.aistudio.aimusic.wltv.jqr8x.data.model.TimedBilingualCue
+import com.aistudio.aimusic.wltv.jqr8x.util.AppCheckDiagnostics
+import com.aistudio.aimusic.wltv.jqr8x.util.AppCheckStatus
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.APINotConfiguredException
@@ -218,6 +220,7 @@ class FirebaseAiTextGenerator(
     }
 
     override suspend fun generateLyrics(request: AiLyricsRequest): AiLyricsResult {
+        AppCheckDiagnostics.markAiRequested()
         val prompt = buildLyricsPrompt(request)
         return try {
             val response = withTimeout(AI_TIMEOUT_MS) {
@@ -253,6 +256,7 @@ class FirebaseAiTextGenerator(
     }
 
     override fun generateLyricsStream(request: AiLyricsRequest): Flow<LyricsStreamEvent> = flow {
+        AppCheckDiagnostics.markAiRequested()
         val prompt = buildLyricsPrompt(request, forStreaming = true)
         val accumulated = StringBuilder()
         try {
@@ -312,6 +316,7 @@ class FirebaseAiTextGenerator(
         language: String,
         batchSeed: Int
     ): AiIdeasResult {
+        AppCheckDiagnostics.markAiRequested()
         val prompt = buildIdeasPrompt(category, genre, mood, language, batchSeed)
         return try {
             val response = withTimeout(AI_TIMEOUT_MS) {
@@ -901,13 +906,16 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
 
         internal fun mapAiException(
             error: Throwable,
-            modelName: String = FreeSparkModels.DEFAULT_FREE_MODEL
+            modelName: String = FreeSparkModels.DEFAULT_FREE_MODEL,
+            appCheckStatus: AppCheckStatus = AppCheckDiagnostics.status
         ): AiGenerationException {
             val causeChain = generateSequence(error) { it.cause }.toList()
             val rawChainMessages = causeChain
                 .mapNotNull { it.message }
                 .joinToString(" | ")
             val lower = rawChainMessages.lowercase()
+            val tokenErrorLower = appCheckStatus.lastTokenError.orEmpty().lowercase()
+            val combinedLower = "$lower | $tokenErrorLower"
             val safeDetail = sanitizeDiagnostic(rawChainMessages)
             val rootType = causeChain.lastOrNull()?.javaClass?.simpleName ?: "Exception"
             val detectedStatus = extractHttpStatus(rawChainMessages)
@@ -933,18 +941,43 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                     lower.contains("api_key_android_app_blocked") ||
                     lower.contains("requests from this android client application")
 
-            fun hasAppCheckOrPermissionError(): Boolean =
+            fun hasExplicit403OrPermission(): Boolean =
                 causeChain.any { it is PermissionMissingException } ||
                     detectedStatus == 403 ||
                     detectedStatus == 401 ||
+                    lower.contains("permission_denied") ||
+                    lower.contains("permission denied") ||
+                    lower.contains("caller does not have permission") ||
+                    lower.contains("unauthenticated") ||
+                    lower.contains("unauthorized")
+
+            fun hasAppCheckTokenMissing(): Boolean =
+                combinedLower.contains("app check token missing") ||
+                    combinedLower.contains("app check token is missing") ||
+                    combinedLower.contains("missing app check") ||
+                    combinedLower.contains("no appcheckprovider") ||
+                    combinedLower.contains("no app check provider") ||
+                    combinedLower.contains("provider is not installed") ||
+                    combinedLower.contains("placeholder app check") ||
+                    (hasExplicit403OrPermission() && !appCheckStatus.initialized)
+
+            fun hasAppCheckAttestationFailed(): Boolean =
+                lower.contains("app attestation failed") ||
+                    lower.contains("attestation") ||
                     lower.contains("app check") ||
                     lower.contains("appcheck") ||
                     lower.contains("app_check") ||
-                    lower.contains("attestation") ||
-                    lower.contains("permission_denied") ||
-                    lower.contains("permission denied") ||
-                    lower.contains("unauthenticated") ||
-                    lower.contains("unauthorized")
+                    lower.contains("debug token") ||
+                    lower.contains("play integrity") ||
+                    lower.contains("integrity") ||
+                    tokenErrorLower.contains("attestation") ||
+                    tokenErrorLower.contains("403") ||
+                    tokenErrorLower.contains("app check") ||
+                    tokenErrorLower.contains("integrity") ||
+                    (hasExplicit403OrPermission() && appCheckStatus.tokenCheckAttempted && !appCheckStatus.tokenObtained)
+
+            fun hasFirebasePermissionDenied(): Boolean =
+                hasExplicit403OrPermission()
 
             fun hasApiNotConfigured(): Boolean =
                 causeChain.any { it is APINotConfiguredException } ||
@@ -991,7 +1024,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
 
             return when {
                 hasQuotaError() -> AiGenerationException(
-                    message = "Free Spark AI quota exhausted (HTTP ${detectedStatus ?: 429}). Wait briefly and tap Retry.",
+                    message = "Gemini generation failure — Free Spark AI quota exhausted (HTTP ${detectedStatus ?: 429}). Wait briefly and tap Retry.",
                     reason = AiFailureReason.QUOTA_EXCEEDED,
                     cause = error,
                     httpStatus = detectedStatus ?: 429,
@@ -999,7 +1032,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasServiceDisabled() -> AiGenerationException(
-                    message = "Firebase AI Logic service is disabled (HTTP ${detectedStatus ?: 403} • ServiceDisabled) for project $PROJECT_ID. Please retry after backend provisioning completes.",
+                    message = "Firebase permission denied — Firebase AI Logic service is disabled (HTTP ${detectedStatus ?: 403} • ServiceDisabled) for project $PROJECT_ID. Enable Firebase AI Logic in Firebase Console and tap Retry.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
@@ -1007,23 +1040,46 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasInvalidOrRestrictedKey() -> AiGenerationException(
-                    message = "App Check / Android API key restriction failed (HTTP ${detectedStatus ?: 403}). Verify google-services.json and SHA-1 fingerprint, then tap Retry.",
+                    message = "Firebase permission denied — Android API key or package/SHA restriction blocked the request (HTTP ${detectedStatus ?: 403}). Verify google-services.json and SHA-1/SHA-256 fingerprints, then tap Retry.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
                     diagnosticCode = "ANDROID_KEY_OR_APP_RESTRICTED"
                 )
 
-                hasAppCheckOrPermissionError() -> AiGenerationException(
-                    message = "App Check or permission problem (HTTP ${detectedStatus ?: 403}). Ensure App Check attestation is active for this build and tap Retry.",
+                hasAppCheckTokenMissing() -> AiGenerationException(
+                    message = "App Check token missing (HTTP ${detectedStatus ?: 403}). App Check provider (${appCheckStatus.providerName}) did not supply a token before the Gemini request. Restart the app and tap Retry.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
-                    diagnosticCode = "APP_CHECK_OR_PERMISSION_403"
+                    diagnosticCode = "APP_CHECK_TOKEN_MISSING"
+                )
+
+                hasAppCheckAttestationFailed() -> {
+                    val guidance = if (appCheckStatus.isDebugBuild) {
+                        "Register this debug build's App Check debug token from Logcat (tag: AppCheckInit) in Firebase Console -> App Check -> Apps -> Manage debug tokens, then tap Retry."
+                    } else {
+                        "Play Integrity could not attest this build. Verify the app is registered in Firebase Console -> App Check -> Apps with your SHA-256 certificate, then tap Retry."
+                    }
+                    AiGenerationException(
+                        message = "App Check attestation failed (HTTP ${detectedStatus ?: 403} • ${appCheckStatus.providerName}). $guidance",
+                        reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
+                        cause = error,
+                        httpStatus = detectedStatus ?: 403,
+                        diagnosticCode = "APP_CHECK_ATTESTATION_FAILED"
+                    )
+                }
+
+                hasFirebasePermissionDenied() -> AiGenerationException(
+                    message = "Firebase permission denied (HTTP ${detectedStatus ?: 403}). App Check token was present, but Firebase rejected permissions for project $PROJECT_ID. Check Firebase AI Logic permissions and tap Retry.",
+                    reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
+                    cause = error,
+                    httpStatus = detectedStatus ?: 403,
+                    diagnosticCode = "FIREBASE_PERMISSION_DENIED"
                 )
 
                 hasApiNotConfigured() -> AiGenerationException(
-                    message = "Firebase AI Logic (Gemini Developer API) configuration was not found (HTTP ${detectedStatus ?: 404} • APINotConfigured). Tap Retry once backend setup is complete.",
+                    message = "Gemini generation failure — Firebase AI Logic (Gemini Developer API) configuration was not found (HTTP ${detectedStatus ?: 404} • APINotConfigured). Tap Retry once backend setup is complete.",
                     reason = AiFailureReason.MODEL_UNAVAILABLE,
                     cause = error,
                     httpStatus = detectedStatus ?: 404,
@@ -1031,7 +1087,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasModelOrEndpoint404() -> AiGenerationException(
-                    message = "Model or Firebase AI configuration problem (HTTP 404 • $modelName). Tap Retry or verify Gemini Developer API configuration.",
+                    message = "Gemini generation failure — Model or Firebase AI configuration problem (HTTP 404 • $modelName). Tap Retry or verify Gemini Developer API configuration.",
                     reason = AiFailureReason.MODEL_UNAVAILABLE,
                     cause = error,
                     httpStatus = 404,
@@ -1039,7 +1095,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasNetworkError() -> AiGenerationException(
-                    message = "Internet connection problem or network timeout. Check Wi-Fi/mobile data and tap Retry.",
+                    message = "Network unavailable — Internet connection problem or network timeout. Check Wi-Fi/mobile data and tap Retry.",
                     reason = AiFailureReason.NETWORK_UNAVAILABLE,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -1047,7 +1103,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasUnsupportedLocation() -> AiGenerationException(
-                    message = "Live Gemini Developer API is not supported in this region ($rootType).",
+                    message = "Gemini generation failure — Live Gemini Developer API is not supported in this region ($rootType).",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -1055,7 +1111,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasSafetyOrStoppedError() -> AiGenerationException(
-                    message = "AI response was blocked or stopped by safety filters ($rootType). Adjust your title or theme and tap Retry.",
+                    message = "Gemini generation failure — AI response was blocked or stopped by safety filters ($rootType). Adjust your title or theme and tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -1063,7 +1119,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasSerializationError() -> AiGenerationException(
-                    message = "Gemini returned an unexpected response format ($rootType). Please tap Retry.",
+                    message = "Gemini generation failure — Unexpected response format ($rootType). Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -1079,7 +1135,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                     }
                     val detailSuffix = if (safeDetail.isNotBlank()) ": $safeDetail" else ""
                     AiGenerationException(
-                        message = "Gemini AI request failed ($statusTag$sdkTag$detailSuffix). Please tap Retry.",
+                        message = "Gemini generation failure ($statusTag$sdkTag$detailSuffix). Please tap Retry.",
                         reason = AiFailureReason.UNKNOWN,
                         cause = error,
                         httpStatus = detectedStatus,

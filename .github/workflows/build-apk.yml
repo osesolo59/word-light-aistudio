@@ -354,7 +354,8 @@ jobs:
             --tests "com.aistudio.aimusic.wltv.jqr8x.data.media.ProVideoBrandingAndCodecTest" \
             --tests "com.aistudio.aimusic.wltv.jqr8x.data.bilingual.BilingualGospelAndCuesTest" \
             --tests "com.aistudio.aimusic.wltv.jqr8x.data.publishing.PublishingProtocolTest" \
-            --tests "com.aistudio.aimusic.wltv.jqr8x.data.ai.FirebaseAiLyricsAndFallbackTest"
+            --tests "com.aistudio.aimusic.wltv.jqr8x.data.ai.FirebaseAiLyricsAndFallbackTest" \
+            --tests "com.aistudio.aimusic.wltv.jqr8x.util.AppCheckHelperTest"
 
       - name: Upload debug APK artifact
         id: upload_artifact

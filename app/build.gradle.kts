@@ -135,8 +135,9 @@ dependencies {
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
+  // Play Integrity is used in release builds and DebugAppCheckProvider in debug builds:
+  // implementation(libs.firebase.appcheck.recaptcha)
+  debugImplementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // Unused HTTP body logger disabled to avoid accidental token logging and reduce APK size:

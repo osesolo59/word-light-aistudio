@@ -593,8 +593,15 @@ fun AiLyricsGeneratorScreen(
                     ) {
                         Column(
                             modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Text(
+                                text = lyricsErrorHeadline(errorState.reason, errorState.diagnosticCode),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.testTag("lyrics_gen_error_headline")
+                            )
                             Text(
                                 text = errorState.message,
                                 style = MaterialTheme.typography.bodySmall,

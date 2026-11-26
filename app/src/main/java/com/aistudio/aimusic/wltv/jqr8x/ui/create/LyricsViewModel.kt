@@ -36,9 +36,23 @@ sealed interface LyricsUiState {
     data class Saved(val lyricId: String, val title: String) : LyricsUiState
     data class Error(
         val message: String,
-        val reason: AiFailureReason? = null
+        val reason: AiFailureReason? = null,
+        val diagnosticCode: String = ""
     ) : LyricsUiState
 }
+
+fun lyricsErrorHeadline(reason: AiFailureReason?, diagnosticCode: String = ""): String =
+    when {
+        diagnosticCode == "APP_CHECK_TOKEN_MISSING" -> "App Check Token Missing"
+        diagnosticCode == "APP_CHECK_ATTESTATION_FAILED" -> "App Check Attestation Failed"
+        diagnosticCode in setOf(
+            "FIREBASE_PERMISSION_DENIED",
+            "SERVICE_DISABLED",
+            "ANDROID_KEY_OR_APP_RESTRICTED"
+        ) || reason == AiFailureReason.PERMISSION_OR_APP_CHECK -> "Firebase Permission Denied"
+        reason == AiFailureReason.NETWORK_UNAVAILABLE -> "Network Unavailable"
+        else -> "Gemini Generation Failure"
+    }
 
 class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
 
@@ -111,15 +125,17 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
             } catch (e: AiGenerationException) {
                 Log.e("LyricsVM", "AI generation failed reason=${e.reason} code=${e.diagnosticCode} http=${e.httpStatus ?: "n/a"}")
                 _uiState.value = LyricsUiState.Error(
-                    message = e.message ?: "Gemini AI request failed. Please tap Retry.",
-                    reason = e.reason
+                    message = e.message ?: "Gemini generation failure. Please tap Retry.",
+                    reason = e.reason,
+                    diagnosticCode = e.diagnosticCode
                 )
             } catch (e: Exception) {
                 val mapped = FirebaseAiTextGenerator.mapAiException(e)
                 Log.e("LyricsVM", "Unexpected generation failure reason=${mapped.reason} code=${mapped.diagnosticCode}")
                 _uiState.value = LyricsUiState.Error(
-                    message = mapped.message ?: "Gemini AI request failed. Please tap Retry.",
-                    reason = mapped.reason
+                    message = mapped.message ?: "Gemini generation failure. Please tap Retry.",
+                    reason = mapped.reason,
+                    diagnosticCode = mapped.diagnosticCode
                 )
             }
         }
