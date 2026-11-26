@@ -81,11 +81,27 @@ import com.aistudio.aimusic.wltv.jqr8x.data.model.TimedBilingualCue
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
 
 private val LYRICS_GENRE_CHIPS = listOf(
-    "Gospel", "Worship", "Praise", "Reggae", "Highlife", "Hip-hop", "Afrobeat", "Contemporary", "Pop", "R&B"
+    "Gospel Worship",
+    "African Gospel",
+    "African Gospel Worship",
+    "Ghanaian Gospel",
+    "Reggae Gospel",
+    "Contemporary Worship",
+    "Afro-Gospel",
+    "Gospel Highlife",
+    "Gospel Praise",
+    "Instrumental"
 )
 
 private val LYRICS_MOOD_CHIPS = listOf(
-    "Uplifting", "Joyful", "Reverent", "Peaceful", "Soulful", "Energetic", "Reflective"
+    "Uplifting",
+    "Powerful, uplifting, worshipful",
+    "Joyful",
+    "Reverent",
+    "Peaceful",
+    "Soulful",
+    "Energetic",
+    "Reflective"
 )
 
 data class DisplayedLyricsResult(
@@ -95,7 +111,6 @@ data class DisplayedLyricsResult(
     val mood: String,
     val topic: String,
     val language: String,
-    val isDemo: Boolean,
     val modelName: String,
     val scriptureReference: String,
     val captionCues: List<TimedBilingualCue> = emptyList()
@@ -124,15 +139,14 @@ fun AiLyricsGeneratorScreen(
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
 
+    var songTitle by rememberSaveable { mutableStateOf("") }
     var topic by rememberSaveable { mutableStateOf("") }
-    var genre by rememberSaveable { mutableStateOf("Gospel") }
+    var genre by rememberSaveable { mutableStateOf("Gospel Worship") }
     var mood by rememberSaveable { mutableStateOf("Uplifting") }
     var language by rememberSaveable { mutableStateOf("English") }
-    var songTitle by rememberSaveable { mutableStateOf("") }
     var userInstructions by rememberSaveable { mutableStateOf("") }
     var scriptureReference by rememberSaveable { mutableStateOf("") }
     var showAdvancedOptions by rememberSaveable { mutableStateOf(false) }
-    var useDemoMode by rememberSaveable { mutableStateOf(false) }
 
     var displayedResult by remember { mutableStateOf<DisplayedLyricsResult?>(null) }
     var editableLyrics by rememberSaveable { mutableStateOf("") }
@@ -158,11 +172,10 @@ fun AiLyricsGeneratorScreen(
                 displayedResult = DisplayedLyricsResult(
                     title = resolvedTitle,
                     lyrics = state.lyrics,
-                    genre = genre.trim().ifBlank { "Gospel" },
+                    genre = genre.trim().ifBlank { "Gospel Worship" },
                     mood = mood.trim().ifBlank { "Uplifting" },
                     topic = topic.trim(),
                     language = language,
-                    isDemo = state.isDemo,
                     modelName = state.modelName,
                     scriptureReference = state.scriptureReference,
                     captionCues = resolvedCues
@@ -182,7 +195,7 @@ fun AiLyricsGeneratorScreen(
     fun buildRequest(): AiLyricsRequest = AiLyricsRequest(
         title = songTitle.trim(),
         topic = topic.trim(),
-        genre = genre.trim().ifBlank { "Gospel" },
+        genre = genre.trim().ifBlank { "Gospel Worship" },
         mood = mood.trim().ifBlank { "Uplifting" },
         language = language,
         sectionLanguages = if (BilingualGospelHelper.isMixedEnglishTwi(language)) {
@@ -254,27 +267,21 @@ fun AiLyricsGeneratorScreen(
                             modifier = Modifier.testTag("lyrics_screen_header")
                         )
                         Text(
-                            text = if (useDemoMode) {
-                                "Free Demo Mode • Offline Local Templates"
-                            } else {
-                                "Gemini API • ${FreeSparkModels.DEFAULT_FREE_MODEL}"
-                            },
+                            text = "Gemini AI • ${FreeSparkModels.DEFAULT_FREE_MODEL}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f)
                         )
                     }
                 }
                 Surface(
-                    onClick = { useDemoMode = !useDemoMode },
                     color = MaterialTheme.colorScheme.secondary,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .padding(end = 8.dp)
-                        .minimumInteractiveComponentSize()
                         .testTag("lyrics_screen_mode_pill")
                 ) {
                     Text(
-                        text = if (useDemoMode) "FREE DEMO" else "GEMINI AI",
+                        text = "GEMINI AI",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSecondary,
@@ -321,13 +328,25 @@ fun AiLyricsGeneratorScreen(
                         )
                     }
 
-                    // 1. Topic Field
+                    // 1. Song Title Field
+                    OutlinedTextField(
+                        value = songTitle,
+                        onValueChange = { songTitle = it },
+                        label = { Text("Song Title") },
+                        placeholder = { Text("e.g., Roots in Zion") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("lyrics_gen_title_input")
+                    )
+
+                    // 2. Theme / Topic Field
                     OutlinedTextField(
                         value = topic,
                         onValueChange = { topic = it },
-                        label = { Text("Topic") },
-                        placeholder = { Text("e.g., Walking in grace, hope in the storm, Sunday thanksgiving") },
-                        supportingText = { Text("What is your song about?") },
+                        label = { Text("Theme / Topic") },
+                        placeholder = { Text("e.g., Standing firm in God's promise, hope in the storm") },
+                        supportingText = { Text("What is your song about? (Optional if Song Title is clear)") },
                         minLines = 2,
                         maxLines = 4,
                         modifier = Modifier
@@ -335,7 +354,7 @@ fun AiLyricsGeneratorScreen(
                             .testTag("lyrics_gen_topic_input")
                     )
 
-                    // 2. Genre Field + Quick Chips
+                    // 3. Genre Field + Quick Chips
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = "Genre",
@@ -349,12 +368,13 @@ fun AiLyricsGeneratorScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             LYRICS_GENRE_CHIPS.forEach { chipGenre ->
+                                val genreTagSuffix = chipGenre.lowercase()
+                                    .replace(Regex("[^a-z0-9]+"), "_")
+                                    .trim('_')
                                 FilterChip(
                                     selected = genre.equals(chipGenre, ignoreCase = true),
                                     onClick = { genre = chipGenre },
-                                    modifier = Modifier.testTag(
-                                        "lyrics_gen_genre_chip_${chipGenre.lowercase().replace("-", "_").replace("&", "and")}"
-                                    ),
+                                    modifier = Modifier.testTag("lyrics_gen_genre_chip_$genreTagSuffix"),
                                     label = { Text(chipGenre) }
                                 )
                             }
@@ -363,7 +383,7 @@ fun AiLyricsGeneratorScreen(
                             value = genre,
                             onValueChange = { genre = it },
                             label = { Text("Genre") },
-                            placeholder = { Text("Enter or select a genre (e.g., Gospel, Worship, Pop)") },
+                            placeholder = { Text("e.g., African Gospel Worship, Reggae Gospel, Instrumental") },
                             singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -371,7 +391,21 @@ fun AiLyricsGeneratorScreen(
                         )
                     }
 
-                    // 3. Mood Field + Quick Chips
+                    // 4. Language Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Language",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        LanguageSelector(
+                            selected = language,
+                            onSelected = { language = it }
+                        )
+                    }
+
+                    // 5. Mood Field + Quick Chips
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = "Mood",
@@ -385,10 +419,13 @@ fun AiLyricsGeneratorScreen(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             LYRICS_MOOD_CHIPS.forEach { chipMood ->
+                                val moodTagSuffix = chipMood.lowercase()
+                                    .replace(Regex("[^a-z0-9]+"), "_")
+                                    .trim('_')
                                 FilterChip(
                                     selected = mood.equals(chipMood, ignoreCase = true),
                                     onClick = { mood = chipMood },
-                                    modifier = Modifier.testTag("lyrics_gen_mood_chip_${chipMood.lowercase()}"),
+                                    modifier = Modifier.testTag("lyrics_gen_mood_chip_$moodTagSuffix"),
                                     label = { Text(chipMood) }
                                 )
                             }
@@ -397,7 +434,7 @@ fun AiLyricsGeneratorScreen(
                             value = mood,
                             onValueChange = { mood = it },
                             label = { Text("Mood") },
-                            placeholder = { Text("Enter or select a mood (e.g., Uplifting, Reverent, Joyful)") },
+                            placeholder = { Text("e.g., Powerful, uplifting, worshipful") },
                             singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -405,14 +442,14 @@ fun AiLyricsGeneratorScreen(
                         )
                     }
 
-                    // Optional Song Details Toggle (Language, Title, Scripture Theme, Instructions)
+                    // Optional Scripture Reference & Songwriter Notes Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Language: $language",
+                            text = "Optional Scripture Theme & Notes",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -422,7 +459,7 @@ fun AiLyricsGeneratorScreen(
                                 .minimumInteractiveComponentSize()
                                 .testTag("lyrics_gen_advanced_toggle")
                         ) {
-                            Text(if (showAdvancedOptions) "Hide Extra Options" else "Language & Title Options")
+                            Text(if (showAdvancedOptions) "Hide Extra Notes" else "Scripture & Notes")
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 imageVector = if (showAdvancedOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -434,25 +471,6 @@ fun AiLyricsGeneratorScreen(
 
                     AnimatedVisibility(visible = showAdvancedOptions) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(
-                                text = "Language",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            LanguageSelector(
-                                selected = language,
-                                onSelected = { language = it }
-                            )
-                            OutlinedTextField(
-                                value = songTitle,
-                                onValueChange = { songTitle = it },
-                                label = { Text("Preferred Title (Optional)") },
-                                placeholder = { Text("Leave blank to let Gemini suggest a title") },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("lyrics_gen_title_input")
-                            )
                             OutlinedTextField(
                                 value = scriptureReference,
                                 onValueChange = { scriptureReference = it },
@@ -482,12 +500,9 @@ fun AiLyricsGeneratorScreen(
                             savedBannerTitle = null
                             actionFeedback = null
                             isSavingRequest = false
-                            lyricsViewModel.generateLyrics(
-                                request = buildRequest(),
-                                useDemoMode = useDemoMode
-                            )
+                            lyricsViewModel.generateLyrics(buildRequest())
                         },
-                        enabled = topic.isNotBlank() &&
+                        enabled = (songTitle.isNotBlank() || topic.isNotBlank()) &&
                             genre.isNotBlank() &&
                             mood.isNotBlank() &&
                             !isGenerating,
@@ -509,7 +524,7 @@ fun AiLyricsGeneratorScreen(
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = if (useDemoMode) "Building Demo Lyrics..." else "Generating with Gemini...",
+                                text = "Generating with Gemini...",
                                 fontWeight = FontWeight.Bold
                             )
                         } else {
@@ -521,7 +536,7 @@ fun AiLyricsGeneratorScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (useDemoMode) "Generate Demo Lyrics" else "Generate Lyrics with Gemini",
+                                text = "Generate Song",
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -549,19 +564,11 @@ fun AiLyricsGeneratorScreen(
                     )
                     if (displayedResult != null) {
                         Surface(
-                            color = if (displayedResult!!.isDemo) {
-                                MaterialTheme.colorScheme.tertiaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)
-                            },
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f),
                             shape = RoundedCornerShape(20.dp)
                         ) {
                             Text(
-                                text = if (displayedResult!!.isDemo) {
-                                    "Demo Template"
-                                } else {
-                                    "Gemini • ${displayedResult!!.modelName}"
-                                },
+                                text = "Gemini • ${displayedResult!!.modelName}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
@@ -573,7 +580,7 @@ fun AiLyricsGeneratorScreen(
                     }
                 }
 
-                // Error Banner (with Retry + Demo Fallback)
+                // Error Banner (honest error + Retry only)
                 val errorState = uiState as? LyricsUiState.Error
                 if (errorState != null) {
                     Card(
@@ -593,36 +600,18 @@ fun AiLyricsGeneratorScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = {
-                                        isSavingRequest = false
-                                        lyricsViewModel.generateLyrics(
-                                            request = buildRequest(),
-                                            useDemoMode = useDemoMode
-                                        )
-                                    },
-                                    modifier = Modifier
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("lyrics_gen_retry_button")
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Retry")
-                                }
-                                if (errorState.canFallbackToDemo) {
-                                    Button(
-                                        onClick = {
-                                            useDemoMode = true
-                                            lyricsViewModel.generateDemoFallback(buildRequest())
-                                        },
-                                        modifier = Modifier
-                                            .minimumInteractiveComponentSize()
-                                            .testTag("lyrics_gen_fallback_demo_button")
-                                    ) {
-                                        Text("Use Demo Template")
-                                    }
-                                }
+                            Button(
+                                onClick = {
+                                    isSavingRequest = false
+                                    lyricsViewModel.generateLyrics(buildRequest())
+                                },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("lyrics_gen_retry_button")
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Retry")
                             }
                         }
                     }
@@ -754,10 +743,11 @@ fun AiLyricsGeneratorScreen(
                                     Text(
                                         text = "${currentResult.genre} • ${currentResult.mood} • ${currentResult.language}",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.testTag("lyrics_gen_result_meta")
                                     )
                                 }
-                                IconButton(
+                                OutlinedButton(
                                     onClick = {
                                         if (isEditingResult) {
                                             displayedResult = currentResult.copy(lyrics = editableLyrics)
@@ -772,9 +762,12 @@ fun AiLyricsGeneratorScreen(
                                 ) {
                                     Icon(
                                         imageVector = if (isEditingResult) Icons.Default.Visibility else Icons.Default.Edit,
-                                        contentDescription = if (isEditingResult) "Preview formatted lyrics" else "Edit lyrics",
-                                        tint = MaterialTheme.colorScheme.primary
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(if (isEditingResult) "Preview" else "Edit Lyrics")
                                 }
                             }
 
@@ -910,6 +903,23 @@ fun AiLyricsGeneratorScreen(
                             ) {
                                 OutlinedButton(
                                     onClick = {
+                                        savedBannerTitle = null
+                                        actionFeedback = null
+                                        isSavingRequest = false
+                                        lyricsViewModel.generateLyrics(buildRequest())
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("lyrics_gen_regenerate_button")
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Regenerate", maxLines = 1)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
                                         val fullText = buildString {
                                             appendLine(currentResult.title)
                                             appendLine("${currentResult.genre} • ${currentResult.mood}")
@@ -926,9 +936,14 @@ fun AiLyricsGeneratorScreen(
                                 ) {
                                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Copy")
+                                    Text("Copy Lyrics", maxLines = 1)
                                 }
+                            }
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 OutlinedButton(
                                     onClick = {
                                         val shareText = "${currentResult.title}\n\n$activeBody"
@@ -949,14 +964,9 @@ fun AiLyricsGeneratorScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Share")
+                                    Text("Share", maxLines = 1)
                                 }
-                            }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
                                 OutlinedButton(
                                     onClick = {
                                         isSavingRequest = true
@@ -969,7 +979,7 @@ fun AiLyricsGeneratorScreen(
                                             language = currentResult.language,
                                             scriptureReference = currentResult.scriptureReference,
                                             userInstructions = userInstructions.trim(),
-                                            generationSource = if (currentResult.isDemo) "DEMO" else "AI_GEMINI",
+                                            generationSource = "AI_GEMINI",
                                             sectionLanguages = if (BilingualGospelHelper.isMixedEnglishTwi(currentResult.language)) {
                                                 BilingualGospelHelper.defaultSectionLanguages(currentResult.language)
                                             } else {
@@ -991,38 +1001,38 @@ fun AiLyricsGeneratorScreen(
                                     } else {
                                         Icon(Icons.Default.BookmarkAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Save")
+                                        Text("Save Song", maxLines = 1)
                                     }
                                 }
+                            }
 
-                                Button(
-                                    onClick = {
-                                        onUseLyricsInAudioStudio(
-                                            CreativeIdea(
-                                                id = "lyrics_gen_${System.currentTimeMillis()}",
-                                                category = "Lyrics Ideas",
-                                                title = currentResult.title,
-                                                summary = currentResult.topic,
-                                                topic = currentResult.topic.ifBlank { currentResult.title },
-                                                genre = currentResult.genre,
-                                                mood = currentResult.mood,
-                                                language = currentResult.language,
-                                                lyricsPreview = activeBody,
-                                                bibleVerse = currentResult.scriptureReference,
-                                                targetStudio = "LYRICS",
-                                                isDemo = currentResult.isDemo
-                                            )
+                            Button(
+                                onClick = {
+                                    onUseLyricsInAudioStudio(
+                                        CreativeIdea(
+                                            id = "lyrics_gen_${System.currentTimeMillis()}",
+                                            category = "Lyrics Ideas",
+                                            title = currentResult.title,
+                                            summary = currentResult.topic,
+                                            topic = currentResult.topic.ifBlank { currentResult.title },
+                                            genre = currentResult.genre,
+                                            mood = currentResult.mood,
+                                            language = currentResult.language,
+                                            lyricsPreview = activeBody,
+                                            bibleVerse = currentResult.scriptureReference,
+                                            targetStudio = "LYRICS",
+                                            isDemo = false
                                         )
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .minimumInteractiveComponentSize()
-                                        .testTag("lyrics_gen_use_in_studio_button")
-                                ) {
-                                    Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Use in Studio")
-                                }
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("lyrics_gen_use_in_studio_button")
+                            ) {
+                                Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Use in Studio")
                             }
                         }
                     }
@@ -1065,7 +1075,7 @@ fun AiLyricsGeneratorScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Enter a topic, choose a genre and mood above, then tap Generate Lyrics with Gemini to see structured verses, chorus, and bridge here.",
+                                text = "Enter a song title or theme, choose a single genre, language, and mood above, then tap Generate Song to create original lyrics with Gemini.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

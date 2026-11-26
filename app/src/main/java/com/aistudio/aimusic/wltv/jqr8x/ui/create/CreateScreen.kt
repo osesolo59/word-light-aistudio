@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -86,8 +87,7 @@ class CustomModeFormState {
     var vocalStyle by mutableStateOf("Gospel Choir")
     var scriptureReference by mutableStateOf("")
     var userInstructions by mutableStateOf("")
-    var useDemoModeForLyrics by mutableStateOf(false)
-    var generationSource by mutableStateOf("DEMO")
+    var generationSource by mutableStateOf("AI_GEMINI")
     var lyricsModelLabel by mutableStateOf("")
     var isShortClip by mutableStateOf(false)
 }
@@ -266,11 +266,8 @@ fun CreateScreen(
                     onGenerateLyrics = { topic, genre, mood, language ->
                         lyricsViewModel.generateLyrics(topic, genre, mood, language)
                     },
-                    onGenerateAiLyrics = { request, useDemoMode ->
-                        lyricsViewModel.generateLyrics(request, useDemoMode = useDemoMode)
-                    },
-                    onGenerateDemoFallback = { request ->
-                        lyricsViewModel.generateDemoFallback(request)
+                    onGenerateAiLyrics = { request ->
+                        lyricsViewModel.generateLyrics(request)
                     },
                     onSaveLyrics = { title, lyricsText, topic, genre, mood, language ->
                         lyricsViewModel.saveLyrics(title, lyricsText, topic, genre, mood, language)
@@ -588,7 +585,7 @@ fun DemoNotice() {
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = "Free Demo Mode is active. AI music/lyrics synthesis is simulated locally with sample audio and templates; your lyrics, titles, and music styles are saved to your account.",
+                text = "Audio track preview uses a sample track in this studio. Real Gemini AI songwriting is active in the Songwriter studio; your lyrics, titles, and music styles are saved to your account.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer
             )
@@ -606,8 +603,7 @@ fun CustomModeScreen(
     onPrefillConsumed: () -> Unit = {},
     onResetLyricsState: () -> Unit,
     onGenerateLyrics: (topic: String, genre: String, mood: String, language: String) -> Unit,
-    onGenerateAiLyrics: ((request: AiLyricsRequest, useDemoMode: Boolean) -> Unit)? = null,
-    onGenerateDemoFallback: ((request: AiLyricsRequest) -> Unit)? = null,
+    onGenerateAiLyrics: ((request: AiLyricsRequest) -> Unit)? = null,
     onSaveLyrics: (title: String, lyrics: String, topic: String, genre: String, mood: String, language: String) -> Unit,
     onSaveLyricsWithMeta: ((
         title: String,
@@ -704,12 +700,8 @@ fun CustomModeScreen(
                 } else if (formState.title.isBlank() && formState.topic.isNotBlank()) {
                     formState.title = formState.topic.trim().take(60)
                 }
-                formState.generationSource = if (lyricsState.isDemo) "DEMO" else "AI_GEMINI"
-                formState.lyricsModelLabel = if (lyricsState.isDemo) {
-                    "Demo Template"
-                } else {
-                    "Live AI • ${lyricsState.modelName}"
-                }
+                formState.generationSource = "AI_GEMINI"
+                formState.lyricsModelLabel = "Gemini • ${lyricsState.modelName}"
             }
             else -> Unit
         }
@@ -721,21 +713,17 @@ fun CustomModeScreen(
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // Lyrics Engine Status & Toggle Card (Live Free Spark AI vs Offline Demo Fallback)
+        // Gemini AI Songwriter Status Card
         Card(
             colors = CardDefaults.cardColors(
-                containerColor = if (formState.useDemoModeForLyrics) {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.primaryContainer
-                }
+                containerColor = MaterialTheme.colorScheme.primaryContainer
             ),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -744,40 +732,33 @@ fun CustomModeScreen(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Icon(
-                            imageVector = if (formState.useDemoModeForLyrics) Icons.Default.Info else Icons.Default.AutoAwesome,
+                            imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = if (formState.useDemoModeForLyrics) {
-                                MaterialTheme.colorScheme.onTertiaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            }
+                            tint = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (formState.useDemoModeForLyrics) {
-                                "Lyrics: Free Demo Mode"
-                            } else {
-                                "Lyrics: Live AI (${FreeSparkModels.DEFAULT_FREE_MODEL})"
-                            },
+                            text = "Songwriter AI: Gemini (${FreeSparkModels.DEFAULT_FREE_MODEL})",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    FilterChip(
-                        selected = !formState.useDemoModeForLyrics,
-                        onClick = { formState.useDemoModeForLyrics = !formState.useDemoModeForLyrics },
-                        modifier = Modifier.testTag("lyrics_mode_toggle"),
-                        label = {
-                            Text(if (formState.useDemoModeForLyrics) "Switch to Live AI" else "Live AI On")
-                        }
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("lyrics_mode_toggle")
+                    ) {
+                        Text(
+                            text = "GEMINI AI",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
                 Text(
-                    text = if (formState.useDemoModeForLyrics) {
-                        "Using offline local templates in English, Twi, Akan, Ga, and Ewe. Tap Switch to Live AI for Firebase AI Logic (${FreeSparkModels.DEFAULT_FREE_MODEL}) on Spark."
-                    } else {
-                        "Real AI lyrics powered by Firebase AI Logic (${FreeSparkModels.DEFAULT_FREE_MODEL}) on the free Spark plan. Audio composition stays in Free Demo Mode."
-                    },
+                    text = "Original lyrics powered by Gemini via Firebase AI Logic. Audio synthesis preview remains a local sample track.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -940,7 +921,7 @@ fun CustomModeScreen(
                 onClick = {
                     val req = currentLyricsRequest()
                     if (onGenerateAiLyrics != null) {
-                        onGenerateAiLyrics(req, formState.useDemoModeForLyrics)
+                        onGenerateAiLyrics(req)
                     } else {
                         onGenerateLyrics(
                             formState.topic.ifBlank { formState.title },
@@ -963,7 +944,7 @@ fun CustomModeScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 } else {
-                    Text(if (formState.useDemoModeForLyrics) "Demo Lyrics" else "Generate AI Lyrics")
+                    Text("Generate AI Lyrics")
                 }
             }
 
@@ -1033,28 +1014,27 @@ fun CustomModeScreen(
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodySmall
                     )
-                    if (lyricsState.canFallbackToDemo) {
-                        OutlinedButton(
-                            onClick = {
-                                formState.useDemoModeForLyrics = true
-                                val req = currentLyricsRequest()
-                                if (onGenerateDemoFallback != null) {
-                                    onGenerateDemoFallback(req)
-                                } else {
-                                    onGenerateLyrics(
-                                        formState.topic.ifBlank { formState.title },
-                                        resolvedGenre,
-                                        formState.mood,
-                                        formState.language
-                                    )
-                                }
-                            },
-                            modifier = Modifier
-                                .minimumInteractiveComponentSize()
-                                .testTag("lyrics_fallback_demo_button")
-                        ) {
-                            Text("Use Demo Mode Instead")
-                        }
+                    Button(
+                        onClick = {
+                            val req = currentLyricsRequest()
+                            if (onGenerateAiLyrics != null) {
+                                onGenerateAiLyrics(req)
+                            } else {
+                                onGenerateLyrics(
+                                    formState.topic.ifBlank { formState.title },
+                                    resolvedGenre,
+                                    formState.mood,
+                                    formState.language
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .minimumInteractiveComponentSize()
+                            .testTag("lyrics_retry_button")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Retry")
                     }
                 }
             }

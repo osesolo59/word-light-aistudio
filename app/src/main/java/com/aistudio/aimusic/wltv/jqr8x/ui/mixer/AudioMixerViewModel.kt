@@ -150,7 +150,11 @@ class AudioMixerViewModel(
                         emptyMap()
                     }
                 )
-                val result = repository.generateAiLyrics(request, useDemoMode = !useLiveAi)
+                val result = if (useLiveAi) {
+                    repository.generateAiLyrics(request)
+                } else {
+                    repository.buildDemoLyricsResult(request)
+                }
                 _uiState.update {
                     it.copy(
                         isGeneratingLyrics = false,
@@ -170,7 +174,7 @@ class AudioMixerViewModel(
                 _uiState.update {
                     it.copy(
                         isGeneratingLyrics = false,
-                        errorMessage = e.localizedMessage ?: "Live AI lyrics unavailable; tap 'Demo Lyrics' to continue free offline."
+                        errorMessage = e.localizedMessage ?: "Live Gemini lyrics unavailable. Check your connection and retry."
                     )
                 }
             }

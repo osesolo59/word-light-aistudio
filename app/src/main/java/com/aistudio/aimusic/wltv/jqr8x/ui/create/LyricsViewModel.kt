@@ -6,9 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.aistudio.aimusic.wltv.jqr8x.data.ai.AiFailureReason
 import com.aistudio.aimusic.wltv.jqr8x.data.ai.AiGenerationException
 import com.aistudio.aimusic.wltv.jqr8x.data.ai.AiLyricsRequest
+import com.aistudio.aimusic.wltv.jqr8x.data.ai.FirebaseAiTextGenerator
 import com.aistudio.aimusic.wltv.jqr8x.data.ai.FreeSparkModels
 import com.aistudio.aimusic.wltv.jqr8x.data.ai.LyricsStreamEvent
-import com.aistudio.aimusic.wltv.jqr8x.data.bilingual.BilingualGospelHelper
 import com.aistudio.aimusic.wltv.jqr8x.data.model.TimedBilingualCue
 import com.aistudio.aimusic.wltv.jqr8x.data.repository.MusicRepository
 import kotlinx.coroutines.CancellationException
@@ -28,15 +28,14 @@ sealed interface LyricsUiState {
     data class Success(
         val lyrics: String,
         val title: String = "",
-        val isDemo: Boolean = true,
-        val modelName: String = "demo-local-template",
+        val isDemo: Boolean = false,
+        val modelName: String = FreeSparkModels.DEFAULT_FREE_MODEL,
         val scriptureReference: String = "",
         val captionCues: List<TimedBilingualCue> = emptyList()
     ) : LyricsUiState
     data class Saved(val lyricId: String, val title: String) : LyricsUiState
     data class Error(
         val message: String,
-        val canFallbackToDemo: Boolean = true,
         val reason: AiFailureReason? = null
     ) : LyricsUiState
 }
@@ -58,32 +57,24 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
                 genre = genre,
                 mood = mood,
                 language = language
-            ),
-            useDemoMode = false
+            )
         )
     }
 
-    fun generateLyrics(
-        request: AiLyricsRequest,
-        useDemoMode: Boolean = false
-    ) {
+    fun generateLyrics(request: AiLyricsRequest) {
         viewModelScope.launch {
             _uiState.value = LyricsUiState.Loading
             try {
                 withTimeout(65_000L) {
                     var completed = false
-                    repository.generateAiLyricsStream(request, useDemoMode = useDemoMode)
+                    repository.generateAiLyricsStream(request)
                         .collect { event ->
                             when (event) {
                                 is LyricsStreamEvent.Chunk -> {
                                     if (event.partialText.isNotBlank()) {
                                         _uiState.value = LyricsUiState.Streaming(
                                             partialLyrics = event.partialText,
-                                            modelName = if (useDemoMode) {
-                                                "demo-local-template"
-                                            } else {
-                                                repository.activeAiModelName()
-                                            }
+                                            modelName = repository.activeAiModelName()
                                         )
                                     }
                                 }
@@ -101,8 +92,7 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
                                         )
                                     } else {
                                         _uiState.value = LyricsUiState.Error(
-                                            message = "Live AI returned empty lyrics. Retry or use Free Demo Mode instead.",
-                                            canFallbackToDemo = true,
+                                            message = "Gemini returned empty lyrics. Please tap Retry.",
                                             reason = AiFailureReason.UNKNOWN
                                         )
                                     }
@@ -110,23 +100,10 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
                             }
                         }
                     if (!completed) {
-                        val current = _uiState.value
-                        if (current is LyricsUiState.Streaming && current.partialLyrics.isNotBlank()) {
-                            _uiState.value = LyricsUiState.Success(
-                                lyrics = current.partialLyrics,
-                                title = request.title.ifBlank { request.topic.ifBlank { "Song of Praise" } },
-                                isDemo = useDemoMode,
-                                modelName = current.modelName,
-                                scriptureReference = request.scriptureReference,
-                                captionCues = BilingualGospelHelper.generateCuesFromLyrics(current.partialLyrics)
-                            )
-                        } else if (current is LyricsUiState.Loading) {
-                            _uiState.value = LyricsUiState.Error(
-                                message = "Live AI returned empty lyrics. Retry or use Free Demo Mode instead.",
-                                canFallbackToDemo = true,
-                                reason = AiFailureReason.UNKNOWN
-                            )
-                        }
+                        _uiState.value = LyricsUiState.Error(
+                            message = "Gemini response was incomplete. Please tap Retry.",
+                            reason = AiFailureReason.UNKNOWN
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -134,32 +111,18 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
             } catch (e: AiGenerationException) {
                 Log.e("LyricsVM", "AI generation failed reason=${e.reason} code=${e.diagnosticCode} http=${e.httpStatus ?: "n/a"}")
                 _uiState.value = LyricsUiState.Error(
-                    message = e.message ?: "Live AI request failed. You can use Free Demo Mode instead.",
-                    canFallbackToDemo = true,
+                    message = e.message ?: "Gemini AI request failed. Please tap Retry.",
                     reason = e.reason
                 )
             } catch (e: Exception) {
-                val mapped = com.aistudio.aimusic.wltv.jqr8x.data.ai.FirebaseAiTextGenerator.mapAiException(e)
+                val mapped = FirebaseAiTextGenerator.mapAiException(e)
                 Log.e("LyricsVM", "Unexpected generation failure reason=${mapped.reason} code=${mapped.diagnosticCode}")
                 _uiState.value = LyricsUiState.Error(
-                    message = mapped.message ?: "Live AI request failed. You can use Free Demo Mode instead.",
-                    canFallbackToDemo = true,
+                    message = mapped.message ?: "Gemini AI request failed. Please tap Retry.",
                     reason = mapped.reason
                 )
             }
         }
-    }
-
-    fun generateDemoFallback(request: AiLyricsRequest) {
-        val result = repository.buildDemoLyricsResult(request)
-        _uiState.value = LyricsUiState.Success(
-            lyrics = result.lyrics,
-            title = result.title,
-            isDemo = true,
-            modelName = result.modelName,
-            scriptureReference = result.scriptureReference,
-            captionCues = result.captionCues
-        )
     }
 
     fun saveLyrics(
@@ -171,7 +134,7 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
         language: String,
         scriptureReference: String = "",
         userInstructions: String = "",
-        generationSource: String = "DEMO",
+        generationSource: String = "AI_GEMINI",
         sectionLanguages: Map<String, String> = emptyMap(),
         captionCues: List<TimedBilingualCue> = emptyList()
     ) {
@@ -199,8 +162,7 @@ class LyricsViewModel(private val repository: MusicRepository) : ViewModel() {
             } catch (e: Exception) {
                 Log.e("LyricsVM", "Saving lyrics failed", e)
                 _uiState.value = LyricsUiState.Error(
-                    message = e.localizedMessage ?: "Failed to save lyrics.",
-                    canFallbackToDemo = false
+                    message = e.localizedMessage ?: "Failed to save lyrics."
                 )
             }
         }

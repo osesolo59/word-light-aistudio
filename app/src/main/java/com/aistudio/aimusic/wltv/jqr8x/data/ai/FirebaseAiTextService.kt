@@ -126,17 +126,20 @@ class FirebaseAiTextGenerator(
         Schema.obj(
             properties = mapOf(
                 "title" to Schema.string(description = "Original song title"),
-                "intro" to Schema.string(description = "Short 2 to 4 line musical/vocal intro without bracket header"),
-                "verse1" to Schema.string(description = "Verse 1 lyrics (4 to 6 singable lines)"),
-                "verse2" to Schema.string(description = "Verse 2 lyrics (4 to 6 singable lines)"),
-                "chorus" to Schema.string(description = "Memorable Gospel chorus lyrics (4 to 6 singable lines)"),
+                "intro" to Schema.string(description = "Optional short 2 to 3 line intro without bracket header"),
+                "verse1" to Schema.string(description = "Verse 1 lyrics (4 to 6 complete, original singable lines)"),
+                "preChorus" to Schema.string(description = "Optional 2-line Pre-Chorus lifting into the chorus"),
+                "chorus" to Schema.string(description = "Memorable Gospel chorus lyrics (4 to 6 complete singable lines)"),
+                "verse2" to Schema.string(description = "Verse 2 lyrics (4 to 6 completely new lines distinct from Verse 1)"),
                 "bridge" to Schema.string(description = "Expressive Gospel bridge lyrics (2 to 4 lines)"),
-                "outro" to Schema.string(description = "Uplifting closing outro lines (2 to 4 lines)"),
+                "finalChorus" to Schema.string(description = "Optional lifted closing chorus variation (4 lines)"),
+                "outro" to Schema.string(description = "Optional uplifting closing outro lines (2 to 3 lines)"),
                 "cues" to Schema.array(
                     items = cueSchema,
-                    description = "Optional synchronized English + Twi timed caption cues matching the song sections"
+                    description = "Optional synchronized English + Twi timed caption cues when bilingual/Twi is requested"
                 )
-            )
+            ),
+            optionalProperties = listOf("intro", "preChorus", "bridge", "finalChorus", "outro", "cues")
         )
     }
 
@@ -222,7 +225,7 @@ class FirebaseAiTextGenerator(
             }
             val rawJson = response.text
                 ?: throw AiGenerationException(
-                    message = "Live AI returned an empty lyrics response. Retry or use Free Demo Mode instead.",
+                    message = "Gemini returned an empty response. Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     diagnosticCode = "EMPTY_LYRICS_RESPONSE"
                 )
@@ -230,7 +233,7 @@ class FirebaseAiTextGenerator(
         } catch (e: CancellationException) {
             if (e is TimeoutCancellationException) {
                 val mapped = AiGenerationException(
-                    message = "Internet connection problem or network timeout after 60 seconds. Check your connection or use Free Demo Mode.",
+                    message = "Internet connection problem or network timeout after 60 seconds. Check your connection and tap Retry.",
                     reason = AiFailureReason.NETWORK_UNAVAILABLE,
                     cause = e,
                     diagnosticCode = "CLIENT_TIMEOUT"
@@ -258,23 +261,32 @@ class FirebaseAiTextGenerator(
                     val chunkText = responseChunk.text.orEmpty()
                     if (chunkText.isNotEmpty()) {
                         accumulated.append(chunkText)
-                        emit(LyricsStreamEvent.Chunk(accumulated.toString()))
+                        val livePreview = sanitizeStreamingPreview(accumulated.toString())
+                        if (livePreview.isNotBlank()) {
+                            emit(LyricsStreamEvent.Chunk(livePreview))
+                        }
                     }
                 }
             }
             val finalText = accumulated.toString().trim()
             if (finalText.isBlank()) {
-                throw AiGenerationException(
-                    message = "Live AI returned an empty lyrics stream. Retry or use Free Demo Mode instead.",
-                    reason = AiFailureReason.UNKNOWN,
-                    diagnosticCode = "EMPTY_LYRICS_STREAM"
-                )
+                // Fall back to structured schema call before reporting failure
+                emit(LyricsStreamEvent.Completed(generateLyrics(request)))
+            } else {
+                val parsedOrNull = runCatching {
+                    parseStreamingLyricsText(finalText, request, modelName)
+                }.getOrNull()
+                if (parsedOrNull != null) {
+                    emit(LyricsStreamEvent.Completed(parsedOrNull))
+                } else {
+                    Log.w(TAG, "Streamed output was incomplete or malformed; requesting structured JSON completion.")
+                    emit(LyricsStreamEvent.Completed(generateLyrics(request)))
+                }
             }
-            emit(LyricsStreamEvent.Completed(parseStreamingLyricsText(finalText, request, modelName)))
         } catch (e: CancellationException) {
             if (e is TimeoutCancellationException) {
                 val mapped = AiGenerationException(
-                    message = "Internet connection problem or network timeout after 60 seconds. Check your connection or use Free Demo Mode.",
+                    message = "Internet connection problem or network timeout after 60 seconds. Check your connection and tap Retry.",
                     reason = AiFailureReason.NETWORK_UNAVAILABLE,
                     cause = e,
                     diagnosticCode = "CLIENT_TIMEOUT"
@@ -307,7 +319,7 @@ class FirebaseAiTextGenerator(
             }
             val rawJson = response.text
                 ?: throw AiGenerationException(
-                    message = "Live AI returned an empty ideas response. Retry or use Free Demo Mode instead.",
+                    message = "Live AI returned an empty ideas response. Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     diagnosticCode = "EMPTY_IDEAS_RESPONSE"
                 )
@@ -320,7 +332,7 @@ class FirebaseAiTextGenerator(
             )
             if (parsed.isEmpty()) {
                 throw AiGenerationException(
-                    message = "Live AI returned no usable ideas in JSON response. Retry or use Free Demo Mode instead.",
+                    message = "Live AI returned no usable ideas in JSON response. Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     diagnosticCode = "EMPTY_IDEAS_ARRAY"
                 )
@@ -333,7 +345,7 @@ class FirebaseAiTextGenerator(
         } catch (e: CancellationException) {
             if (e is TimeoutCancellationException) {
                 val mapped = AiGenerationException(
-                    message = "Internet connection problem or network timeout while generating ideas. Check your connection or use Free Demo Mode.",
+                    message = "Internet connection problem or network timeout while generating ideas. Check your connection and tap Retry.",
                     reason = AiFailureReason.NETWORK_UNAVAILABLE,
                     cause = e,
                     diagnosticCode = "CLIENT_TIMEOUT"
@@ -360,45 +372,64 @@ class FirebaseAiTextGenerator(
         internal fun selectedBackend(): GenerativeBackend = GenerativeBackend.googleAI()
 
         private const val LYRICS_SYSTEM_INSTRUCTION = """
-You are an expert Christian Gospel songwriter and Ghanaian Twi worship linguist for Word & Light AI STUDIO.
-Write original, singable, spiritually uplifting song lyrics tailored to the requested language, section language plan, genre, mood, tempo, instruments, and vocal style.
-Rules you MUST obey:
-1. Write authentically in the requested language:
-   - English: natural contemporary worship/gospel phrasing.
-   - Twi / Akan: authentic, idiomatic Ghanaian Asante Twi Gospel worship expressions using proper Twi orthography (ɛ, ɔ) such as Onyankopɔn, Awurade Yesu, Aseda sɛ Wo, Ayeyi nka Wo din, Wo adom dɔɔso, Mmɔborɔhunu, Asomdwoeɛ Hene, Nkonimdifoɔ, Ɔbɔadeɛ. Avoid robotic word-for-word literal translations; use natural Ghanaian praise idioms and call-and-response cadence.
-   - Mixed English + Twi: seamlessly weave English and Ghanaian Twi within the same song, strictly following any per-section language assignments (English, Twi, or Mixed English / Twi).
-   - Ga: natural Ghanaian Ga Gospel expressions (e.g., Nyɔŋmɔ, Nuŋtsɔ, Yesu, Yijiemɔ, La, Wala).
-   - Ewe: natural Ghanaian Ewe Gospel expressions (e.g., Mawu, Aƒetɔ, Yesu, Kafukafu, Akpe, Kekeli, Agbe).
-2. NEVER invent, fabricate, or pretend to quote exact Bible verse text inside the lyrics. Keep Bible references strictly separate from the sung lyrics. If a scripture reference is supplied, let only its general theme inspire the original lyrics without quoting fabricated scripture text.
-3. Always provide clear content for title, intro, verse1, verse2, chorus, bridge, and outro, plus synchronized English and Twi caption cues in `cues` whenever English, Twi, or Mixed English + Twi is selected.
-4. Keep each section field cleanly focused on lyric lines without repeating bracket section labels like [Verse 1].
+You are an accomplished Christian Gospel songwriter and worship lyricist.
+Write 100% original, complete, coherent, singable, biblically faithful song lyrics tailored strictly to the user's title, theme, genre, mood, language, tempo, instruments, and vocal style.
+
+STRICT RULES YOU MUST OBEY:
+1. ORIGINALITY & COMPLETENESS:
+   - Write fresh, meaningful, poetic lyrics with complete grammatical sentences.
+   - Never copy existing published songs. Never write placeholder filler, random words, or incomplete lines.
+   - Never repeat Verse 1 as Verse 2. Each verse must advance the song's message.
+   - Do not repeat the song title mindlessly inside unrelated verse lines.
+   - Do not duplicate identical chorus blocks back-to-back.
+2. STRICT GENRE CONTROL:
+   - Write exclusively in the SINGLE requested genre (e.g., Gospel Worship, African Gospel, African Gospel Worship, Ghanaian Gospel, Reggae Gospel, Contemporary Worship, Afro-Gospel, Gospel Highlife, Gospel Praise, or Instrumental).
+   - Never mix or blend other genres unless the user explicitly enters a fusion genre.
+3. STRICT LANGUAGE FIDELITY:
+   - English: write completely in natural, rich English. Do NOT inject Twi or other languages unless requested.
+   - Twi / Akan: authentic, idiomatic Ghanaian Asante Twi Gospel worship expressions with proper orthography (ɛ, ɔ). Avoid robotic literal translations.
+   - Mixed English + Twi: weave English and Ghanaian Twi according to the per-section language plan.
+   - Ga / Ewe: write naturally in the requested Ghanaian language.
+4. ZERO PROMPT ECHOING & ZERO COMMENTARY:
+   - NEVER repeat, echo, or include any prompt instructions, metadata labels (Genre:, Mood:, Language:, Theme:, Prompt:), app/studio names, or conversational commentary ("Here are your lyrics", "Enjoy", etc.).
+   - NEVER invent or quote fake Bible verse citations inside the sung lyrics; keep scripture references strictly separate from lyrics.
+5. Keep each JSON section field clean (do NOT include bracket headers like [Verse 1] inside JSON field values). Provide synchronized English + Twi cues only when bilingual/Twi lyrics are requested.
 """
 
         private const val STREAMING_LYRICS_SYSTEM_INSTRUCTION = """
-You are an expert Christian Gospel songwriter and Ghanaian Twi worship linguist for Word & Light AI STUDIO.
-Write original, singable, spiritually uplifting song lyrics tailored to the requested language, section language plan, genre, mood, tempo, instruments, and vocal style.
-Rules you MUST obey:
-1. Write authentically in the requested language (English, idiomatic Ghanaian Asante Twi with proper ɛ/ɔ orthography, Mixed English + Twi, Ga, or Ewe).
-2. NEVER invent, fabricate, or pretend to quote exact Bible verse text inside the lyrics. Keep Bible references strictly separate from the sung lyrics.
-3. Output clean formatted song lyrics directly as plain text (NOT JSON, NOT markdown code fences) starting with:
-Title: <Original Song Title>
+You are an accomplished Christian Gospel songwriter and worship lyricist.
+Write 100% original, complete, coherent, singable, biblically faithful song lyrics tailored strictly to the user's title, theme, genre, mood, language, tempo, instruments, and vocal style.
 
-[Intro]
+STRICT RULES YOU MUST OBEY:
+1. Write ONLY in the single requested genre (do not mix genres unless fusion is requested) and strictly in the requested language (pure English if English is chosen; no unrequested language mixing).
+2. Verse 1 and Verse 2 MUST be completely different and meaningful. Never duplicate verses, never repeat chorus blocks back-to-back, and never insert random words or unfinished sentences.
+3. NEVER include songwriting prompt instructions, field labels (Genre:, Mood:, Language:, Theme:), app names, disclaimers, or conversational notes anywhere in the output.
+4. NEVER invent or quote fake scripture text inside the lyrics.
+5. Output ONLY clean formatted song lyrics as plain text (NO JSON, NO markdown fences, NO commentary) using natural Gospel structure adjusted to the genre:
+Title: <Song Title>
+
+[Intro] (optional)
 ...
 
 [Verse 1]
 ...
 
-[Verse 2]
+[Pre-Chorus] (optional)
 ...
 
 [Chorus]
 ...
 
+[Verse 2]
+...
+
 [Bridge]
 ...
 
-[Outro]
+[Final Chorus] (optional variation)
+...
+
+[Outro] (optional)
 ...
 """
 
@@ -417,33 +448,35 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
             request: AiLyricsRequest,
             forStreaming: Boolean = false
         ): String {
-            val subject = listOf(request.title.trim(), request.topic.trim())
-                .filter { it.isNotBlank() }
-                .distinct()
-                .joinToString(" / ")
-                .ifBlank { "God's Grace and Light" }
+            val cleanTitle = request.title.trim()
+            val cleanTopic = request.topic.trim()
+            val effectiveTheme = cleanTopic.ifBlank { cleanTitle }.ifBlank { "Walking in God's Grace and Light" }
+            val cleanGenre = request.genre.trim().ifBlank { "Gospel Worship" }
+            val cleanMood = request.mood.trim().ifBlank { "Uplifting" }
+            val cleanLanguage = request.language.trim().ifBlank { "English" }
             val instrumentsText = if (request.instruments.isNotEmpty()) {
                 request.instruments.joinToString(", ")
             } else {
-                "Piano, Acoustic Guitar"
+                ""
             }
             val effectiveSections = if (request.sectionLanguages.isNotEmpty()) {
                 request.sectionLanguages
-            } else if (BilingualGospelHelper.isMixedEnglishTwi(request.language)) {
-                BilingualGospelHelper.defaultSectionLanguages(request.language)
+            } else if (BilingualGospelHelper.isMixedEnglishTwi(cleanLanguage)) {
+                BilingualGospelHelper.defaultSectionLanguages(cleanLanguage)
             } else {
                 emptyMap()
             }
+            val isInstrumental = cleanGenre.contains("Instrumental", ignoreCase = true)
             return buildString {
-                appendLine("Create original Gospel song lyrics with the following specification:")
-                appendLine("- Song Title or Topic: $subject")
-                if (request.title.isNotBlank()) appendLine("- Preferred Song Title: ${request.title.trim()}")
-                appendLine("- Genre: ${request.genre.ifBlank { "Gospel" }}")
-                appendLine("- Music Style / Instruments: $instrumentsText")
-                appendLine("- Vocal Style: ${request.vocalStyle.ifBlank { "Gospel Choir" }}")
-                appendLine("- Mood: ${request.mood.ifBlank { "Uplifting" }}")
-                appendLine("- Tempo: ${request.tempo.ifBlank { "Moderate (95 BPM)" }}")
-                appendLine("- Language: ${request.language.ifBlank { "English" }}")
+                appendLine("Write an original Christian Gospel song matching this exact specification (do NOT copy or echo this specification block into the output):")
+                if (cleanTitle.isNotBlank()) appendLine("- Song Title: $cleanTitle")
+                appendLine("- Core Theme / Message: $effectiveTheme")
+                appendLine("- Exclusive Genre (stay strictly within this single genre): $cleanGenre")
+                appendLine("- Mood & Atmosphere: $cleanMood")
+                appendLine("- Language (write strictly in this language): $cleanLanguage")
+                if (request.tempo.isNotBlank()) appendLine("- Tempo Feel: ${request.tempo.trim()}")
+                if (instrumentsText.isNotBlank()) appendLine("- Musical Arrangement Feel: $instrumentsText")
+                if (request.vocalStyle.isNotBlank()) appendLine("- Vocal Delivery: ${request.vocalStyle.trim()}")
                 if (effectiveSections.isNotEmpty()) {
                     appendLine("- Per-Section Language Assignment (OBEY STRICTLY for each section):")
                     BilingualGospelHelper.SONG_SECTIONS.forEach { sec ->
@@ -452,18 +485,23 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                             appendLine("  * $sec -> $assigned")
                         }
                     }
-                    appendLine("  For any section marked Mixed, blend natural English and Asante Twi lines (using 'English / Twi' or alternating lines).")
+                    appendLine("  For sections marked Mixed, blend natural English and Asante Twi lines.")
                 }
                 if (request.scriptureReference.isNotBlank()) {
-                    appendLine("- Separate Scripture Theme Reference (inspiration only — DO NOT insert quoted verse text or chapter:verse citations inside the lyrics): ${request.scriptureReference.trim()}")
+                    appendLine("- Thematic Scripture Inspiration (DO NOT insert quoted Bible text or chapter:verse citations inside the lyrics): ${request.scriptureReference.trim()}")
                 }
                 if (request.userInstructions.isNotBlank()) {
-                    appendLine("- Additional Songwriter Instructions: ${request.userInstructions.trim()}")
+                    appendLine("- Additional Songwriter Notes: ${request.userInstructions.trim()}")
+                }
+                if (isInstrumental) {
+                    appendLine("- Note: This is an Instrumental worship piece — provide concise musical/spoken worship arrangement cues and an optional brief refrain rather than dense verses.")
+                } else {
+                    appendLine("- Required Quality: distinct Verse 1 and Verse 2, a memorable Chorus, a Bridge, optional Intro/Pre-Chorus/Final Chorus/Outro, natural grammar, complete lines, zero duplicated verses, zero commentary.")
                 }
                 if (forStreaming) {
-                    appendLine("Output clean plain-text song lyrics starting with 'Title: ...' followed by [Intro], [Verse 1], [Verse 2], [Chorus], [Bridge], and [Outro] sections.")
+                    appendLine("Return ONLY the finished song lyrics starting with 'Title: ...' and bracketed section headers ([Intro], [Verse 1], [Pre-Chorus], [Chorus], [Verse 2], [Bridge], [Final Chorus], [Outro] as fits $cleanGenre).")
                 } else {
-                    appendLine("Return JSON matching the schema with title, intro, verse1, verse2, chorus, bridge, outro, and synchronized `cues` (each cue with startSec, endSec, section, english, twi).")
+                    appendLine("Return valid JSON matching the schema with original, distinct sections (never repeat verse1 in verse2).")
                 }
             }
         }
@@ -483,6 +521,37 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
             appendLine("- Creative variation seed: $batchSeed (make titles and angles distinct from standard defaults)")
         }
 
+        private val PROMPT_LEAK_PATTERNS = listOf(
+            Regex("^create original gospel song lyrics.*$", RegexOption.IGNORE_CASE),
+            Regex("^write an original christian gospel song.*$", RegexOption.IGNORE_CASE),
+            Regex("^-\\s*(song title or topic|preferred song title|song title|core theme|exclusive genre|genre|music style|vocal style|vocal delivery|mood|tempo|language|per-section language|thematic scripture|separate scripture|additional songwriter).*$", RegexOption.IGNORE_CASE),
+            Regex("^\\s*(here (are|is) (the|your) (original )?lyrics.*|note:.*|disclaimer:.*)\\s*$", RegexOption.IGNORE_CASE),
+            Regex(".*\\(demo mode:.*\\).*", RegexOption.IGNORE_CASE),
+            Regex("^\\[demo lyrics.*\\]$", RegexOption.IGNORE_CASE),
+            Regex(".*simulated locally.*", RegexOption.IGNORE_CASE)
+        )
+
+        internal fun stripLeakedPromptLines(text: String): String =
+            text.lines()
+                .filterNot { line ->
+                    val t = line.trim()
+                    t.isNotEmpty() && PROMPT_LEAK_PATTERNS.any { it.matches(t) }
+                }
+                .joinToString("\n")
+                .trim()
+
+        internal fun sanitizeStreamingPreview(rawAccumulated: String): String {
+            val unfenced = rawAccumulated
+                .replace(Regex("^```[a-zA-Z]*\\s*"), "")
+                .replace(Regex("\\s*```$"), "")
+            return stripLeakedPromptLines(unfenced)
+        }
+
+        private fun normalizeForDedup(sectionText: String): String =
+            sectionText.lowercase()
+                .replace(Regex("[^a-z0-9\\p{L}]+"), " ")
+                .trim()
+
         internal fun parseLyricsJson(
             rawJson: String,
             request: AiLyricsRequest,
@@ -497,22 +566,43 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
 
             fun cleanSection(key: String): String {
                 val raw = json.optString(key).trim()
-                return raw.replace(Regex("^\\[(intro|verse\\s*1|verse\\s*2|chorus|bridge|outro)[^\\]]*\\]\\s*", RegexOption.IGNORE_CASE), "")
-                    .trim()
+                val withoutHeader = raw.replace(
+                    Regex("^\\[(intro|verse\\s*1|verse\\s*2|pre[-\\s]*chorus|chorus|bridge|final\\s*chorus|outro)[^\\]]*\\]\\s*", RegexOption.IGNORE_CASE),
+                    ""
+                ).trim()
+                return stripLeakedPromptLines(withoutHeader)
             }
 
-            val intro = cleanSection("intro").ifBlank { "(Warm ${request.instruments.firstOrNull() ?: "Piano"} entrance in ${request.language})" }
+            val isInstrumental = request.genre.contains("Instrumental", ignoreCase = true)
+            val intro = cleanSection("intro")
             val verse1 = cleanSection("verse1")
-            val verse2 = cleanSection("verse2")
+            val preChorus = cleanSection("preChorus")
             val chorus = cleanSection("chorus")
+            val verse2 = cleanSection("verse2")
             val bridge = cleanSection("bridge")
+            val finalChorus = cleanSection("finalChorus")
             val outro = cleanSection("outro")
 
-            if (verse1.isBlank() || chorus.isBlank()) {
+            if (!isInstrumental) {
+                if (verse1.isBlank() || chorus.isBlank()) {
+                    throw AiGenerationException(
+                        message = "Gemini returned an incomplete song without Verse 1 and Chorus. Please tap Retry.",
+                        reason = AiFailureReason.UNKNOWN,
+                        diagnosticCode = "INCOMPLETE_LYRICS_SECTIONS"
+                    )
+                }
+                if (verse2.isNotBlank() && normalizeForDedup(verse1) == normalizeForDedup(verse2)) {
+                    throw AiGenerationException(
+                        message = "Gemini returned duplicated verses. Please tap Retry.",
+                        reason = AiFailureReason.UNKNOWN,
+                        diagnosticCode = "DUPLICATE_LYRICS_VERSES"
+                    )
+                }
+            } else if (intro.isBlank() && verse1.isBlank() && chorus.isBlank() && outro.isBlank()) {
                 throw AiGenerationException(
-                    message = "Live AI response was missing core lyric sections. Retry or use Free Demo Mode instead.",
+                    message = "Gemini returned an empty instrumental arrangement. Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
-                    diagnosticCode = "INCOMPLETE_LYRICS_SECTIONS"
+                    diagnosticCode = "EMPTY_INSTRUMENTAL_RESPONSE"
                 )
             }
 
@@ -528,24 +618,46 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
 
             val formattedLyrics = buildString {
                 appendLine("Title: $resolvedTitle")
-                appendLine()
-                appendLine(header("Intro"))
-                appendLine(intro)
-                appendLine()
-                appendLine(header("Verse 1"))
-                appendLine(verse1)
-                appendLine()
-                appendLine(header("Verse 2"))
-                appendLine(verse2.ifBlank { verse1 })
-                appendLine()
-                appendLine(header("Chorus"))
-                appendLine(chorus)
-                appendLine()
-                appendLine(header("Bridge"))
-                appendLine(bridge.ifBlank { chorus })
-                appendLine()
-                appendLine(header("Outro"))
-                append(outro.ifBlank { intro })
+                if (intro.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Intro"))
+                    appendLine(intro)
+                }
+                if (verse1.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Verse 1"))
+                    appendLine(verse1)
+                }
+                if (preChorus.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Pre-Chorus"))
+                    appendLine(preChorus)
+                }
+                if (chorus.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Chorus"))
+                    appendLine(chorus)
+                }
+                if (verse2.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Verse 2"))
+                    appendLine(verse2)
+                }
+                if (bridge.isNotBlank() && normalizeForDedup(bridge) != normalizeForDedup(chorus)) {
+                    appendLine()
+                    appendLine(header("Bridge"))
+                    appendLine(bridge)
+                }
+                if (finalChorus.isNotBlank() && normalizeForDedup(finalChorus) != normalizeForDedup(chorus)) {
+                    appendLine()
+                    appendLine(header("Final Chorus"))
+                    appendLine(finalChorus)
+                }
+                if (outro.isNotBlank()) {
+                    appendLine()
+                    appendLine(header("Outro"))
+                    append(outro)
+                }
             }.trim()
 
             val parsedCues = buildList {
@@ -589,10 +701,12 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
             request: AiLyricsRequest,
             modelName: String
         ): AiLyricsResult {
-            val cleaned = rawText
-                .replace(Regex("^```[a-zA-Z]*\\s*"), "")
-                .replace(Regex("\\s*```$"), "")
-                .trim()
+            val cleaned = stripLeakedPromptLines(
+                rawText
+                    .replace(Regex("^```[a-zA-Z]*\\s*"), "")
+                    .replace(Regex("\\s*```$"), "")
+                    .trim()
+            )
             val lines = cleaned.lines()
             val titleLine = lines.firstOrNull { it.trim().startsWith("Title:", ignoreCase = true) }
             val extractedTitle = titleLine
@@ -606,15 +720,83 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 .ifBlank { "Song of Praise" }
                 .take(100)
 
-            val formattedLyrics = if (titleLine == null) {
-                "Title: $resolvedTitle\n\n$cleaned"
-            } else {
-                cleaned
+            // Parse sections in natural song order and reject incomplete / duplicated streamed responses
+            val sections = mutableListOf<Pair<String, MutableList<String>>>()
+            var currentLines: MutableList<String>? = null
+            for (rawLine in lines) {
+                val trimmed = rawLine.trim()
+                if (trimmed.isEmpty()) continue
+                if (trimmed.startsWith("Title:", ignoreCase = true)) continue
+                val bracketMatch = Regex("^\\[([^\\]]+)\\]$").find(trimmed)
+                if (bracketMatch != null) {
+                    val hdr = bracketMatch.groupValues[1].trim()
+                    val list = mutableListOf<String>()
+                    sections.add(hdr to list)
+                    currentLines = list
+                } else {
+                    if (currentLines == null) {
+                        val list = mutableListOf<String>()
+                        sections.add("Verse 1" to list)
+                        currentLines = list
+                    }
+                    currentLines.add(trimmed)
+                }
             }
-            val parsedCues = BilingualGospelHelper.generateCuesFromLyrics(formattedLyrics)
+
+            // Drop empty sections and accidental consecutive identical chorus/section duplicates
+            val dedupedSections = mutableListOf<Pair<String, List<String>>>()
+            for ((hdr, secLines) in sections) {
+                if (secLines.isEmpty()) continue
+                val normCurr = normalizeForDedup(secLines.joinToString("\n"))
+                val prevNorm = dedupedSections.lastOrNull()?.second?.let { normalizeForDedup(it.joinToString("\n")) }
+                if (normCurr.isNotEmpty() && normCurr == prevNorm) {
+                    continue
+                }
+                dedupedSections.add(hdr to secLines.toList())
+            }
+
+            val isInstrumental = request.genre.contains("Instrumental", ignoreCase = true)
+            val bodyAfterTitle = buildString {
+                appendLine("Title: $resolvedTitle")
+                dedupedSections.forEach { (hdr, secLines) ->
+                    appendLine()
+                    appendLine("[$hdr]")
+                    secLines.forEach { appendLine(it) }
+                }
+            }.trim()
+
+            if (!isInstrumental) {
+                val v1 = dedupedSections.firstOrNull { it.first.startsWith("Verse 1", ignoreCase = true) }?.second?.joinToString("\n").orEmpty()
+                val v2 = dedupedSections.firstOrNull { it.first.startsWith("Verse 2", ignoreCase = true) }?.second?.joinToString("\n").orEmpty()
+                val ch = dedupedSections.firstOrNull {
+                    it.first.equals("Chorus", ignoreCase = true) || it.first.contains("Chorus", ignoreCase = true)
+                }?.second?.joinToString("\n").orEmpty()
+                if (v1.isBlank() || ch.isBlank()) {
+                    throw AiGenerationException(
+                        message = "Gemini returned incomplete lyric sections. Please tap Retry.",
+                        reason = AiFailureReason.UNKNOWN,
+                        diagnosticCode = "INCOMPLETE_STREAMED_LYRICS"
+                    )
+                }
+                if (v2.isNotBlank() && normalizeForDedup(v1) == normalizeForDedup(v2)) {
+                    throw AiGenerationException(
+                        message = "Gemini returned duplicated verses. Please tap Retry.",
+                        reason = AiFailureReason.UNKNOWN,
+                        diagnosticCode = "DUPLICATE_STREAMED_VERSES"
+                    )
+                }
+            } else if (dedupedSections.isEmpty()) {
+                throw AiGenerationException(
+                    message = "Gemini returned an empty response. Please tap Retry.",
+                    reason = AiFailureReason.UNKNOWN,
+                    diagnosticCode = "EMPTY_STREAMED_LYRICS"
+                )
+            }
+
+            val parsedCues = BilingualGospelHelper.generateCuesFromLyrics(bodyAfterTitle)
             return AiLyricsResult(
                 title = resolvedTitle,
-                lyrics = formattedLyrics,
+                lyrics = bodyAfterTitle,
                 scriptureReference = request.scriptureReference.trim(),
                 modelName = modelName,
                 isDemo = false,
@@ -809,7 +991,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
 
             return when {
                 hasQuotaError() -> AiGenerationException(
-                    message = "Free Spark AI quota exhausted (HTTP ${detectedStatus ?: 429}). Wait briefly or use Free Demo Mode instead.",
+                    message = "Free Spark AI quota exhausted (HTTP ${detectedStatus ?: 429}). Wait briefly and tap Retry.",
                     reason = AiFailureReason.QUOTA_EXCEEDED,
                     cause = error,
                     httpStatus = detectedStatus ?: 429,
@@ -817,7 +999,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasServiceDisabled() -> AiGenerationException(
-                    message = "Firebase AI Logic permission/service is disabled (HTTP ${detectedStatus ?: 403} • ServiceDisabled). Verify Firebase AI Logic is enabled for project $PROJECT_ID, or use Free Demo Mode instead.",
+                    message = "Firebase AI Logic service is disabled (HTTP ${detectedStatus ?: 403} • ServiceDisabled) for project $PROJECT_ID. Please retry after backend provisioning completes.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
@@ -825,7 +1007,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasInvalidOrRestrictedKey() -> AiGenerationException(
-                    message = "App check / Android API key restriction failed (HTTP ${detectedStatus ?: 403}). Verify google-services.json and SHA-1 client restrictions, or use Free Demo Mode instead.",
+                    message = "App Check / Android API key restriction failed (HTTP ${detectedStatus ?: 403}). Verify google-services.json and SHA-1 fingerprint, then tap Retry.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
@@ -833,7 +1015,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasAppCheckOrPermissionError() -> AiGenerationException(
-                    message = "App Check or permission problem (HTTP ${detectedStatus ?: 403}). Ensure your debug device token is registered (or Play Integrity/reCAPTCHA is configured for release) in Firebase Console, or use Free Demo Mode instead.",
+                    message = "App Check or permission problem (HTTP ${detectedStatus ?: 403}). Ensure App Check attestation is active for this build and tap Retry.",
                     reason = AiFailureReason.PERMISSION_OR_APP_CHECK,
                     cause = error,
                     httpStatus = detectedStatus ?: 403,
@@ -841,7 +1023,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasApiNotConfigured() -> AiGenerationException(
-                    message = "Firebase AI Logic (Gemini Developer API) configuration was not found (HTTP ${detectedStatus ?: 404} • APINotConfigured). Enable Gemini Developer API in Firebase Console, or use Free Demo Mode instead.",
+                    message = "Firebase AI Logic (Gemini Developer API) configuration was not found (HTTP ${detectedStatus ?: 404} • APINotConfigured). Tap Retry once backend setup is complete.",
                     reason = AiFailureReason.MODEL_UNAVAILABLE,
                     cause = error,
                     httpStatus = detectedStatus ?: 404,
@@ -849,7 +1031,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasModelOrEndpoint404() -> AiGenerationException(
-                    message = "Model or Firebase AI configuration problem (HTTP 404 • $modelName). Verify Gemini Developer API setup in Firebase Console, or use Free Demo Mode instead.",
+                    message = "Model or Firebase AI configuration problem (HTTP 404 • $modelName). Tap Retry or verify Gemini Developer API configuration.",
                     reason = AiFailureReason.MODEL_UNAVAILABLE,
                     cause = error,
                     httpStatus = 404,
@@ -857,7 +1039,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasNetworkError() -> AiGenerationException(
-                    message = "Internet connection problem or network timeout. Check Wi-Fi/mobile data and retry, or use Free Demo Mode for offline lyrics.",
+                    message = "Internet connection problem or network timeout. Check Wi-Fi/mobile data and tap Retry.",
                     reason = AiFailureReason.NETWORK_UNAVAILABLE,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -865,7 +1047,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasUnsupportedLocation() -> AiGenerationException(
-                    message = "Live Gemini Developer API is not supported in this region ($rootType). Use Free Demo Mode instead.",
+                    message = "Live Gemini Developer API is not supported in this region ($rootType).",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -873,7 +1055,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasSafetyOrStoppedError() -> AiGenerationException(
-                    message = "AI response was blocked or stopped by safety filters ($rootType). Adjust your topic/instructions or use Free Demo Mode instead.",
+                    message = "AI response was blocked or stopped by safety filters ($rootType). Adjust your title or theme and tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -881,7 +1063,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                 )
 
                 hasSerializationError() -> AiGenerationException(
-                    message = "Live AI returned an unexpected response format ($rootType). Please retry or use Free Demo Mode instead.",
+                    message = "Gemini returned an unexpected response format ($rootType). Please tap Retry.",
                     reason = AiFailureReason.UNKNOWN,
                     cause = error,
                     httpStatus = detectedStatus,
@@ -897,7 +1079,7 @@ Never invent fake Bible quotations; provide only a valid book/chapter:verse refe
                     }
                     val detailSuffix = if (safeDetail.isNotBlank()) ": $safeDetail" else ""
                     AiGenerationException(
-                        message = "Live AI request failed ($statusTag$sdkTag$detailSuffix). You can use Free Demo Mode instead.",
+                        message = "Gemini AI request failed ($statusTag$sdkTag$detailSuffix). Please tap Retry.",
                         reason = AiFailureReason.UNKNOWN,
                         cause = error,
                         httpStatus = detectedStatus,

@@ -82,7 +82,12 @@ class CreateScreenUiTest {
                         generatedTopic = topic
                         generatedGenre = genre
                         generatedLanguage = language
-                        lyricsState = LyricsUiState.Success("[Demo Lyrics — $genre | $language | $mood]\n$topic")
+                        lyricsState = LyricsUiState.Success(
+                            lyrics = "Title: Kingdom Cypher\n\n[Verse 1]\nOnyame ne yɛn hann\n\n[Chorus]\n$topic in $genre ($language | $mood)",
+                            title = "Kingdom Cypher",
+                            isDemo = false,
+                            modelName = "gemini-3.8-flash"
+                        )
                     },
                     onSaveLyrics = { title, lyrics, _, _, _, _ ->
                         savedLyricTitle = title
@@ -115,7 +120,7 @@ class CreateScreenUiTest {
         composeRule.onNodeWithTag("instrument_chip_talking_drum").performScrollTo().performClick()
         composeRule.onNodeWithTag("vocal_chip_call_and_response").performScrollTo().performClick()
 
-        // Click Demo Lyrics button and verify Twi + Hip-hop passed and populated editor
+        // Click Generate AI Lyrics button and verify Twi + Hip-hop passed and populated editor
         composeRule.onNodeWithTag("generate_lyrics_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals("Grace and Light", generatedTopic)
@@ -123,7 +128,7 @@ class CreateScreenUiTest {
         assertEquals("Twi", generatedLanguage)
         composeRule.onNodeWithTag("custom_lyrics_input")
             .performScrollTo()
-            .assertTextContains("Demo Lyrics", substring = true)
+            .assertTextContains("Onyame ne yɛn hann", substring = true)
 
         // Edit lyrics and Save Lyrics
         composeRule.onNodeWithTag("custom_lyrics_input")
@@ -200,8 +205,8 @@ class CreateScreenUiTest {
     }
 
     @Test
-    fun customMode_scriptureReferenceUserInstructionsCopyShareAndDemoFallbackWork() {
-        var usedDemoFlag = false
+    fun customMode_scriptureReferenceUserInstructionsCopyShareAndRetryWork() {
+        var generateCalls = 0
         var savedScripture = ""
         var savedInstructions = ""
         var savedGenSource = ""
@@ -215,21 +220,21 @@ class CreateScreenUiTest {
                     savedLyrics = emptyList(),
                     onResetLyricsState = { lyricsState = LyricsUiState.Idle },
                     onGenerateLyrics = { _, _, _, _ -> },
-                    onGenerateAiLyrics = { req, useDemoMode ->
-                        usedDemoFlag = useDemoMode
-                        lyricsState = LyricsUiState.Error(
-                            message = "Free AI quota reached for now. You can use Free Demo Mode instead.",
-                            canFallbackToDemo = true
-                        )
-                    },
-                    onGenerateDemoFallback = { req ->
-                        lyricsState = LyricsUiState.Success(
-                            lyrics = "Title: ${req.title}\n\n[Intro]\n(Warm Piano)\n\n[Verse 1]\nMawu nye kekeli\n\n[Verse 2]\nAkpe na Wò\n\n[Chorus]\nKafukafu na Wò\n\n[Bridge]\nMíedzia ha\n\n[Outro]\nHaleluya Amen",
-                            title = req.title,
-                            isDemo = true,
-                            modelName = "demo-local-template",
-                            scriptureReference = req.scriptureReference
-                        )
+                    onGenerateAiLyrics = { req ->
+                        generateCalls += 1
+                        lyricsState = if (generateCalls == 1) {
+                            LyricsUiState.Error(
+                                message = "Gemini backend temporarily unreachable. Please tap Retry."
+                            )
+                        } else {
+                            LyricsUiState.Success(
+                                lyrics = "Title: ${req.title}\n\n[Verse 1]\nMawu nye kekeli\n\n[Verse 2]\nAkpe na Wò\n\n[Chorus]\nKafukafu na Wò\n\n[Bridge]\nMíedzia ha",
+                                title = req.title,
+                                isDemo = false,
+                                modelName = "gemini-3.8-flash",
+                                scriptureReference = req.scriptureReference
+                            )
+                        }
                     },
                     onSaveLyrics = { _, _, _, _, _, _ -> },
                     onSaveLyricsWithMeta = { _, _, _, _, _, _, scripture, instructions, genSource ->
@@ -250,15 +255,17 @@ class CreateScreenUiTest {
         composeRule.onNodeWithTag("custom_instructions_input").performScrollTo().performTextInput("Include Ewe joyful refrain")
         composeRule.onNodeWithTag("language_chip_ewe").performScrollTo().performClick()
 
-        // Tap Generate AI Lyrics -> surfaces quota error with Demo Fallback button
+        // Tap Generate AI Lyrics -> surfaces honest error with Retry button (no demo fallback)
         composeRule.onNodeWithTag("generate_lyrics_button").performScrollTo().performClick()
         composeRule.waitForIdle()
-        assertEquals(false, usedDemoFlag)
+        assertEquals(1, generateCalls)
         composeRule.onNodeWithTag("lyrics_error_banner").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("lyrics_fallback_demo_button").assertDoesNotExist()
 
-        // Tap Use Demo Mode Instead -> populates structured 6-section lyrics cleanly
-        composeRule.onNodeWithTag("lyrics_fallback_demo_button").performScrollTo().performClick()
+        // Tap Retry -> invokes real Gemini callback and populates structured lyrics cleanly
+        composeRule.onNodeWithTag("lyrics_retry_button").performScrollTo().performClick()
         composeRule.waitForIdle()
+        assertEquals(2, generateCalls)
         composeRule.onNodeWithTag("custom_lyrics_input")
             .performScrollTo()
             .assertTextContains("[Chorus]", substring = true)
@@ -272,11 +279,11 @@ class CreateScreenUiTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("lyrics_action_feedback_chip").performScrollTo().assertIsDisplayed()
 
-        // Save Lyrics preserves separate scripture reference and instructions
+        // Save Lyrics preserves separate scripture reference and instructions with AI_GEMINI source
         composeRule.onNodeWithTag("save_lyrics_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertEquals("Psalm 27:1", savedScripture)
         assertEquals("Include Ewe joyful refrain", savedInstructions)
-        assertEquals("DEMO", savedGenSource)
+        assertEquals("AI_GEMINI", savedGenSource)
     }
 }

@@ -210,8 +210,27 @@ class FirebaseAiLyricsAndFallbackTest {
         assertTrue(prompt.contains("Upbeat (120 BPM)"))
         assertTrue(prompt.contains("Twi"))
         assertTrue(prompt.contains("Psalm 23:1"))
-        assertTrue(prompt.contains("DO NOT insert quoted verse text"))
+        assertTrue(prompt.contains("DO NOT insert quoted Bible text"))
         assertTrue(prompt.contains("Include congregation call-and-response chorus"))
+    }
+
+    @Test
+    fun buildLyricsPrompt_rootsInZion_enforcesSingleGenreLanguageAndNoPromptEcho() {
+        val request = AiLyricsRequest(
+            title = "Roots in Zion",
+            topic = "Standing firm in God's covenant",
+            genre = "African Gospel Worship",
+            mood = "Powerful, uplifting, worshipful",
+            language = "English"
+        )
+
+        val prompt = FirebaseAiTextGenerator.buildLyricsPrompt(request, forStreaming = true)
+        assertTrue(prompt.contains("Song Title: Roots in Zion"))
+        assertTrue(prompt.contains("Exclusive Genre (stay strictly within this single genre): African Gospel Worship"))
+        assertTrue(prompt.contains("Mood & Atmosphere: Powerful, uplifting, worshipful"))
+        assertTrue(prompt.contains("Language (write strictly in this language): English"))
+        assertTrue(prompt.contains("do NOT copy or echo"))
+        assertTrue(prompt.contains("zero duplicated verses"))
     }
 
     @Test
@@ -232,7 +251,7 @@ class FirebaseAiLyricsAndFallbackTest {
             val req = AiLyricsRequest(
                 title = "Light Song $language",
                 topic = "Praise and Mercy",
-                genre = "Gospel",
+                genre = "Gospel Worship",
                 mood = "Uplifting",
                 tempo = "Moderate (95 BPM)",
                 language = language,
@@ -241,7 +260,7 @@ class FirebaseAiLyricsAndFallbackTest {
                 scriptureReference = "John 8:12",
                 userInstructions = "Keep verses joyful and singable"
             )
-            viewModel.generateLyrics(req, useDemoMode = false)
+            viewModel.generateLyrics(req)
             advanceUntilIdle()
 
             val state = viewModel.uiState.value as LyricsUiState.Success
@@ -262,18 +281,17 @@ class FirebaseAiLyricsAndFallbackTest {
     }
 
     @Test
-    fun lyricsErrors_mapQuotaOfflinePermissionAndRecoverViaDemoFallback() = runTest(testDispatcher) {
+    fun lyricsErrors_mapQuotaOfflinePermissionAndRetryHonestly() = runTest(testDispatcher) {
         val fakeAi = FakeAiTextGenerator()
         val repository = MusicRepository(firestore, auth, aiTextGenerator = fakeAi)
         val viewModel = LyricsViewModel(repository)
 
         val req = AiLyricsRequest(
-            title = "Hope in Twi",
-            topic = "Thanksgiving",
-            genre = "Worship",
-            mood = "Reverent",
-            language = "Twi",
-            scriptureReference = "Psalm 100:4"
+            title = "Roots in Zion",
+            topic = "Steadfast faith",
+            genre = "African Gospel Worship",
+            mood = "Powerful, uplifting, worshipful",
+            language = "English"
         )
 
         val cases = listOf(
@@ -286,24 +304,23 @@ class FirebaseAiLyricsAndFallbackTest {
 
         for ((thrownError, expectedReason) in cases) {
             fakeAi.nextError = thrownError
-            viewModel.generateLyrics(req, useDemoMode = false)
+            viewModel.generateLyrics(req)
             advanceUntilIdle()
 
             val errState = viewModel.uiState.value as LyricsUiState.Error
             assertEquals(expectedReason, errState.reason)
-            assertTrue(errState.canFallbackToDemo)
+            assertFalse(errState.message.contains("Demo Mode", ignoreCase = true))
 
-            // Fallback produces structured 6-section local template lyrics
-            viewModel.generateDemoFallback(req)
-            val demoState = viewModel.uiState.value as LyricsUiState.Success
-            assertTrue(demoState.isDemo)
-            assertTrue(demoState.lyrics.contains("[Intro]"))
-            assertTrue(demoState.lyrics.contains("[Verse 1]"))
-            assertTrue(demoState.lyrics.contains("[Verse 2]"))
-            assertTrue(demoState.lyrics.contains("[Chorus]"))
-            assertTrue(demoState.lyrics.contains("[Bridge]"))
-            assertTrue(demoState.lyrics.contains("[Outro]"))
-            assertEquals("Psalm 100:4", demoState.scriptureReference)
+            // Retry with Gemini working returns real non-demo lyrics
+            fakeAi.nextError = null
+            viewModel.generateLyrics(req)
+            advanceUntilIdle()
+            val retrySuccess = viewModel.uiState.value as LyricsUiState.Success
+            assertFalse(retrySuccess.isDemo)
+            assertEquals("Roots in Zion", retrySuccess.title)
+            assertTrue(retrySuccess.lyrics.contains("[Verse 1]"))
+            assertTrue(retrySuccess.lyrics.contains("[Chorus]"))
+            assertTrue(retrySuccess.lyrics.contains("[Verse 2]"))
         }
     }
 
@@ -496,8 +513,7 @@ class FirebaseAiLyricsAndFallbackTest {
                 mood = "Uplifting",
                 language = "Mixed English + Twi",
                 scriptureReference = "Lamentations 3:22"
-            ),
-            useDemoMode = false
+            )
         )
         advanceUntilIdle()
         collectJob.cancel()
@@ -512,5 +528,142 @@ class FirebaseAiLyricsAndFallbackTest {
         assertFalse(finalSuccess.isDemo)
         assertTrue(finalSuccess.captionCues.isNotEmpty())
         assertTrue(finalSuccess.captionCues.any { it.twiText.contains("Ayeyi") && it.englishText.contains("Praise") })
+    }
+
+    @Test
+    fun parseLyricsJson_rejectsDuplicateVersesAndIncompleteSections() {
+        val request = AiLyricsRequest(
+            title = "Roots in Zion",
+            genre = "African Gospel Worship",
+            language = "English",
+            mood = "Powerful, uplifting, worshipful"
+        )
+        val duplicateJson = """
+            {
+              "title": "Roots in Zion",
+              "verse1": "Planted deep beside the living stream\nYour faithfulness is my eternal song",
+              "verse2": "Planted deep beside the living stream\nYour faithfulness is my eternal song",
+              "chorus": "We stand on Zion's holy hill\nSinging Glory to the Lamb"
+            }
+        """.trimIndent()
+        var duplicateThrew = false
+        try {
+            FirebaseAiTextGenerator.parseLyricsJson(duplicateJson, request, FreeSparkModels.DEFAULT_FREE_MODEL)
+        } catch (e: AiGenerationException) {
+            duplicateThrew = e.diagnosticCode == "DUPLICATE_LYRICS_VERSES"
+        }
+        assertTrue("Duplicate verse1/verse2 must be rejected", duplicateThrew)
+
+        val incompleteJson = """
+            {
+              "title": "Roots in Zion",
+              "verse1": "Only one verse line",
+              "chorus": ""
+            }
+        """.trimIndent()
+        var incompleteThrew = false
+        try {
+            FirebaseAiTextGenerator.parseLyricsJson(incompleteJson, request, FreeSparkModels.DEFAULT_FREE_MODEL)
+        } catch (e: AiGenerationException) {
+            incompleteThrew = e.diagnosticCode == "INCOMPLETE_LYRICS_SECTIONS"
+        }
+        assertTrue("Missing chorus must be rejected", incompleteThrew)
+    }
+
+    @Test
+    fun parseStreamingLyricsText_stripsPromptLeaksAndKeepsRepeatedChorusesClean() {
+        val raw = """
+            Write an original Christian Gospel song matching this exact specification:
+            - Song Title: Roots in Zion
+            - Exclusive Genre: African Gospel Worship
+            Here are the lyrics:
+            Title: Roots in Zion
+
+            [Verse 1]
+            Deep in the soil of grace we stand
+            Anchored by Your mighty hand
+
+            [Chorus]
+            Roots in Zion, strong and free
+            Jesus, You reign in majesty
+
+            [Chorus]
+            Roots in Zion, strong and free
+            Jesus, You reign in majesty
+
+            [Verse 2]
+            Across the hills the drums awake
+            For mercy shines at morning break
+
+            [Chorus]
+            Roots in Zion, strong and free
+            Jesus, You reign in majesty
+
+            [Bridge]
+            No storm can shake the cornerstone
+            Our praise belongs to Christ alone
+
+            [Outro]
+            Amen, Hallelujah
+            (Demo Mode: simulated locally)
+        """.trimIndent()
+
+        val result = FirebaseAiTextGenerator.parseStreamingLyricsText(
+            rawText = raw,
+            request = AiLyricsRequest(
+                title = "Roots in Zion",
+                genre = "African Gospel Worship",
+                language = "English",
+                mood = "Powerful, uplifting, worshipful"
+            ),
+            modelName = FreeSparkModels.DEFAULT_FREE_MODEL
+        )
+
+        assertEquals("Roots in Zion", result.title)
+        assertFalse(result.isDemo)
+        assertFalse(result.lyrics.contains("Write an original Christian Gospel song"))
+        assertFalse(result.lyrics.contains("- Exclusive Genre:"))
+        assertFalse(result.lyrics.contains("Here are the lyrics"))
+        assertFalse(result.lyrics.contains("simulated locally"))
+        // Consecutive duplicate chorus was collapsed while second chorus after Verse 2 stayed
+        assertEquals(2, Regex("\\[Chorus\\]").findAll(result.lyrics).count())
+        assertTrue(result.lyrics.contains("[Verse 1]"))
+        assertTrue(result.lyrics.contains("[Verse 2]"))
+        assertTrue(result.lyrics.contains("[Bridge]"))
+    }
+
+    @Test
+    fun incompleteStream_neverEmitsPartialSuccess() = runTest(testDispatcher) {
+        val incompleteStreamGen = object : AiTextGenerator {
+            override val modelName: String = FreeSparkModels.DEFAULT_FREE_MODEL
+            override suspend fun generateLyrics(request: AiLyricsRequest): AiLyricsResult = error("unused")
+            override fun generateLyricsStream(request: AiLyricsRequest) = kotlinx.coroutines.flow.flow {
+                emit(LyricsStreamEvent.Chunk("[Verse 1]\nPartial unfinished line..."))
+                // Stream terminates without Completed event
+            }
+            override suspend fun generateIdeas(
+                category: String?,
+                genre: String?,
+                mood: String?,
+                language: String,
+                batchSeed: Int
+            ): AiIdeasResult = AiIdeasResult(emptyList(), modelName, isDemo = false)
+        }
+
+        val repository = MusicRepository(firestore, auth, aiTextGenerator = incompleteStreamGen)
+        val viewModel = LyricsViewModel(repository)
+        viewModel.generateLyrics(
+            AiLyricsRequest(
+                title = "Roots in Zion",
+                genre = "African Gospel Worship",
+                language = "English",
+                mood = "Powerful, uplifting, worshipful"
+            )
+        )
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertTrue("Incomplete stream must fail honestly with Retry", state is LyricsUiState.Error)
+        assertTrue((state as LyricsUiState.Error).message.contains("Retry"))
     }
 }

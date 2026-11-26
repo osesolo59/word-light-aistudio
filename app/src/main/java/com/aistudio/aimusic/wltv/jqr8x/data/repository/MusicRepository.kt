@@ -226,27 +226,12 @@ class MusicRepository(
     fun activeAiModelName(): String = aiTextGenerator.modelName
 
     suspend fun generateAiLyrics(
-        request: AiLyricsRequest,
-        useDemoMode: Boolean = false
-    ): AiLyricsResult {
-        if (useDemoMode) {
-            return buildDemoLyricsResult(request)
-        }
-        return aiTextGenerator.generateLyrics(request)
-    }
+        request: AiLyricsRequest
+    ): AiLyricsResult = aiTextGenerator.generateLyrics(request)
 
     fun generateAiLyricsStream(
-        request: AiLyricsRequest,
-        useDemoMode: Boolean = false
-    ): Flow<LyricsStreamEvent> = flow {
-        if (useDemoMode) {
-            emit(LyricsStreamEvent.Completed(buildDemoLyricsResult(request)))
-        } else {
-            aiTextGenerator.generateLyricsStream(request).collect { event ->
-                emit(event)
-            }
-        }
-    }
+        request: AiLyricsRequest
+    ): Flow<LyricsStreamEvent> = aiTextGenerator.generateLyricsStream(request)
 
     fun buildDemoLyricsResult(request: AiLyricsRequest): AiLyricsResult {
         val resolvedTitle = request.title.trim()
@@ -444,14 +429,14 @@ class MusicRepository(
         language: String,
         scriptureReference: String = "",
         userInstructions: String = "",
-        generationSource: String = "DEMO",
+        generationSource: String = "AI_GEMINI",
         sectionLanguages: Map<String, String> = emptyMap(),
         captionCues: List<TimedBilingualCue> = emptyList()
     ): String {
         val uid = requireUserId()
         ensureUserProfileExists()
         val docRef = db.collection("lyrics").document()
-        val safeSource = if (generationSource == "AI_GEMINI") "AI_GEMINI" else "DEMO"
+        val safeSource = if (generationSource == "DEMO") "DEMO" else "AI_GEMINI"
         val cleanSections = sectionLanguages.entries
             .filter { it.key.isNotBlank() && it.value.isNotBlank() }
             .take(12)

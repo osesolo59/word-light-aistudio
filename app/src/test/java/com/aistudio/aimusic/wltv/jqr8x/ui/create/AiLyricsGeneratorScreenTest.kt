@@ -85,16 +85,59 @@ class AiLyricsGeneratorScreenTest {
     }
 
     @Test
-    fun lyricsGenerator_acceptsTopicGenreMood_andDisplaysGeminiResults() {
-        var capturedRequest: AiLyricsRequest? = null
+    fun lyricsGenerator_rootsInZion_displaysTitleGenreLanguageMood_andSupportsRegenerateEditCopy() {
+        val capturedRequests = mutableListOf<AiLyricsRequest>()
+        var generationCount = 0
         val fakeGenerator = object : AiTextGenerator {
             override val modelName: String = "gemini-3.8-flash"
 
             override suspend fun generateLyrics(request: AiLyricsRequest): AiLyricsResult {
-                capturedRequest = request
+                capturedRequests.add(request)
+                generationCount += 1
+                val lyricsBody = if (generationCount == 1) {
+                    """
+                    Title: Roots in Zion
+
+                    [Verse 1]
+                    Ancient rivers water every stone
+                    Planted deep before the Father's throne
+
+                    [Chorus]
+                    Our roots in Zion never run dry
+                    We lift Your banner to the morning sky
+
+                    [Verse 2]
+                    Drums of praise awake across the land
+                    Held forever in Your mighty hand
+
+                    [Bridge]
+                    From generation to eternity
+                    Your steadfast love sets every captive free
+
+                    [Final Chorus]
+                    Our roots in Zion stand in holy fire
+                    You are our joy, our song, our one desire
+                    """.trimIndent()
+                } else {
+                    """
+                    Title: Roots in Zion
+
+                    [Verse 1]
+                    Sacred fire burning in our praise
+                    We remember mercy all our days
+
+                    [Chorus]
+                    Stronger in Zion, lifted by Your grace
+                    Shining with glory in this holy place
+
+                    [Verse 2]
+                    Every nation gathers at Your feet
+                    Making heaven's melody complete
+                    """.trimIndent()
+                }
                 return AiLyricsResult(
-                    title = "Rivers of Peace",
-                    lyrics = "[Verse 1]\nWhen shadows fall across the night\nYour steady promise shines so bright\n\n[Chorus]\nRivers of peace flow over me",
+                    title = request.title.ifBlank { "Roots in Zion" },
+                    lyrics = lyricsBody,
                     scriptureReference = request.scriptureReference,
                     modelName = modelName,
                     isDemo = false
@@ -128,69 +171,97 @@ class AiLyricsGeneratorScreenTest {
         // Empty state is visible initially
         composeRule.onNodeWithTag("lyrics_gen_empty_state").performScrollTo().assertIsDisplayed()
 
-        // Fill Topic, select/edit Genre, select/edit Mood
-        composeRule.onNodeWithTag("lyrics_gen_topic_input")
+        // Fill Title: Roots in Zion, Genre: African Gospel Worship, Language: English, Mood: Powerful, uplifting, worshipful
+        composeRule.onNodeWithTag("lyrics_gen_title_input")
             .performScrollTo()
-            .performTextInput("Finding peace in God's presence")
-        composeRule.onNodeWithTag("lyrics_gen_genre_chip_reggae")
+            .performTextInput("Roots in Zion")
+        composeRule.onNodeWithTag("lyrics_gen_genre_chip_african_gospel_worship")
             .performScrollTo()
             .performClick()
-        composeRule.onNodeWithTag("lyrics_gen_mood_chip_peaceful")
+        composeRule.onNodeWithTag("language_chip_english")
+            .performScrollTo()
+            .performClick()
+        composeRule.onNodeWithTag("lyrics_gen_mood_chip_powerful_uplifting_worshipful")
             .performScrollTo()
             .performClick()
 
-        // Generate via Gemini API
+        // Generate via Gemini AI
         composeRule.onNodeWithTag("lyrics_gen_submit_button")
             .performScrollTo()
             .performClick()
         composeRule.waitForIdle()
 
-        assertNotNull(capturedRequest)
-        assertEquals("Finding peace in God's presence", capturedRequest?.topic)
-        assertEquals("Reggae", capturedRequest?.genre)
-        assertEquals("Peaceful", capturedRequest?.mood)
+        assertEquals(1, capturedRequests.size)
+        val firstReq = capturedRequests.first()
+        assertEquals("Roots in Zion", firstReq.title)
+        assertEquals("African Gospel Worship", firstReq.genre)
+        assertEquals("English", firstReq.language)
+        assertEquals("Powerful, uplifting, worshipful", firstReq.mood)
 
-        // Verify results display area
+        // Verify Song Title, Genre, Mood, Language, Model Badge, and Complete Lyrics displayed
         composeRule.onNodeWithTag("lyrics_gen_result_card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("lyrics_gen_result_title")
             .performScrollTo()
-            .assertTextContains("Rivers of Peace")
+            .assertTextContains("Roots in Zion")
+        composeRule.onNodeWithTag("lyrics_gen_result_meta")
+            .performScrollTo()
+            .assertTextContains("African Gospel Worship • Powerful, uplifting, worshipful • English")
         composeRule.onNodeWithTag("lyrics_gen_result_badge")
             .assertTextContains("Gemini • gemini-3.8-flash", substring = true)
         composeRule.onNodeWithTag("lyrics_gen_result_body")
             .performScrollTo()
-            .assertTextContains("Rivers of peace flow over me", substring = true)
+            .assertTextContains("Our roots in Zion never run dry", substring = true)
+        composeRule.onNodeWithTag("lyrics_gen_save_button").performScrollTo().assertIsDisplayed()
+
+        // Regenerate calls Gemini again and updates lyrics
+        composeRule.onNodeWithTag("lyrics_gen_regenerate_button").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertEquals(2, capturedRequests.size)
+        composeRule.onNodeWithTag("lyrics_gen_result_body")
+            .performScrollTo()
+            .assertTextContains("Stronger in Zion, lifted by Your grace", substring = true)
 
         // Edit and Copy
         composeRule.onNodeWithTag("lyrics_gen_edit_toggle").performScrollTo().performClick()
         composeRule.onNodeWithTag("lyrics_gen_result_editor")
             .performScrollTo()
-            .performTextReplacement("[Chorus]\nUpdated peace refrain")
+            .performTextReplacement("[Chorus]\nUpdated Zion refrain")
         composeRule.onNodeWithTag("lyrics_gen_copy_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("lyrics_gen_feedback_chip").performScrollTo().assertIsDisplayed()
 
-        // Use in Studio transfers updated lyrics, genre, mood, and topic
+        // Use in Studio transfers updated lyrics, genre, mood, language, and title
         composeRule.onNodeWithTag("lyrics_gen_use_in_studio_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         assertNotNull(transferredIdea)
-        assertEquals("Reggae", transferredIdea?.genre)
-        assertEquals("Peaceful", transferredIdea?.mood)
-        assertEquals("Finding peace in God's presence", transferredIdea?.topic)
-        assertEquals("[Chorus]\nUpdated peace refrain", transferredIdea?.lyricsPreview)
+        assertEquals("African Gospel Worship", transferredIdea?.genre)
+        assertEquals("Powerful, uplifting, worshipful", transferredIdea?.mood)
+        assertEquals("English", transferredIdea?.language)
+        assertEquals("Roots in Zion", transferredIdea?.title)
+        assertEquals("[Chorus]\nUpdated Zion refrain", transferredIdea?.lyricsPreview)
     }
 
     @Test
-    fun lyricsGenerator_handlesCustomTypedGenreAndMood_andDemoFallbackOnError() {
+    fun lyricsGenerator_handlesCustomTypedGenreAndMood_andHonestRetryOnError() {
         var capturedRequest: AiLyricsRequest? = null
-        val failingGenerator = object : AiTextGenerator {
+        var shouldFail = true
+        val retryingGenerator = object : AiTextGenerator {
             override val modelName: String = "gemini-3.8-flash"
 
             override suspend fun generateLyrics(request: AiLyricsRequest): AiLyricsResult {
                 capturedRequest = request
-                throw AiGenerationException(
-                    message = "Network unavailable for Gemini.",
-                    reason = AiFailureReason.NETWORK_UNAVAILABLE
+                if (shouldFail) {
+                    throw AiGenerationException(
+                        message = "Network unavailable for Gemini. Please tap Retry.",
+                        reason = AiFailureReason.NETWORK_UNAVAILABLE
+                    )
+                }
+                return AiLyricsResult(
+                    title = "Morning Thanksgiving",
+                    lyrics = "[Verse 1]\nWarm sunlight fills the island air\n\n[Chorus]\nEvery heartbeat lifts a prayer",
+                    scriptureReference = "",
+                    modelName = modelName,
+                    isDemo = false
                 )
             }
 
@@ -203,7 +274,7 @@ class AiLyricsGeneratorScreenTest {
             ): AiIdeasResult = AiIdeasResult(emptyList(), modelName, isDemo = false)
         }
 
-        val repository = MusicRepository(firestore, auth, failingGenerator)
+        val repository = MusicRepository(firestore, auth, retryingGenerator)
 
         composeRule.setContent {
             WordAndLightTheme {
@@ -219,7 +290,7 @@ class AiLyricsGeneratorScreenTest {
             .performTextInput("Morning thanksgiving")
         composeRule.onNodeWithTag("lyrics_gen_genre_input")
             .performScrollTo()
-            .performTextReplacement("Acoustic Soul")
+            .performTextReplacement("Reggae Gospel")
         composeRule.onNodeWithTag("lyrics_gen_mood_input")
             .performScrollTo()
             .performTextReplacement("Grateful")
@@ -229,16 +300,21 @@ class AiLyricsGeneratorScreenTest {
             .performClick()
         composeRule.waitForIdle()
 
-        assertEquals("Acoustic Soul", capturedRequest?.genre)
+        assertEquals("Reggae Gospel", capturedRequest?.genre)
         assertEquals("Grateful", capturedRequest?.mood)
         composeRule.onNodeWithTag("lyrics_gen_error_banner").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("lyrics_gen_fallback_demo_button").assertDoesNotExist()
 
-        // Tap Demo Fallback -> displays generated lyrics in the results area
-        composeRule.onNodeWithTag("lyrics_gen_fallback_demo_button").performScrollTo().performClick()
+        // Tap Retry once network returns -> Gemini generates real lyrics
+        shouldFail = false
+        composeRule.onNodeWithTag("lyrics_gen_retry_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("lyrics_gen_result_card").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("lyrics_gen_result_badge")
-            .assertTextContains("Demo Template", substring = true)
+            .assertTextContains("Gemini • gemini-3.8-flash", substring = true)
+        composeRule.onNodeWithTag("lyrics_gen_result_body")
+            .performScrollTo()
+            .assertTextContains("Every heartbeat lifts a prayer", substring = true)
     }
 
     @Test
