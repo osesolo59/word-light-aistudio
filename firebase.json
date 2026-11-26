@@ -1,1 +1,36 @@
-{ "project_info": { "project_number": "1035836705469", "project_id": "gen-lang-client-0518223416", "storage_bucket": "gen-lang-client-0518223416.firebasestorage.app" }, "client": [ { "client_info": { "mobilesdk_app_id": "1:1035836705469:android:cd043a7cec9572aba505d4", "android_client_info": { "package_name": "com.aistudio.aimusic.wltv.jqr8x" } }, "oauth_client": [ { "client_id": "1035836705469-fjdeni76dqpeh4bfve32h8vp7uh4pede.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.aistudio.aimusic.wltv.jqr8x", "certificate_hash": "e71913041436c1ec530dc58e41a663924204f04b" } }, { "client_id": "1035836705469-ijieqm7ec3tpvvrrb13di2g3q4klqqrs.apps.googleusercontent.com", "client_type": 1, "android_info": { "package_name": "com.aistudio.aimusic.wltv.jqr8x", "certificate_hash": "14a3c6af07fcc2fef377141429cdb5ef20832505" } }, { "client_id": "1035836705469-8vflgvpi0tri0rr7bbiebbgsstqcuqve.apps.googleusercontent.com", "client_type": 3 } ], "api_key": [ { "current_key": "AIzaSyAYmEpZ4z-ZK9OB3JX8D1Wk-WjzDKQZqT4" } ], "services": { "appinvite_service": { "other_platform_oauth_client": [ { "client_id": "1035836705469-8vflgvpi0tri0rr7bbiebbgsstqcuqve.apps.googleusercontent.com", "client_type": 3 } ] } } } ], "configuration_version": "1" }
+{
+  "firestore": [
+    {
+      "database": "ai-studio-android-wordligh-6c38febb-2572-4fb1-840d-e10fc09376b8",
+      "rules": "firestore.rules"
+    }
+  ],
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": {
+    "source": "backend",
+    "runtime": "nodejs20"
+  },
+  "emulators": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8085
+    },
+    "storage": {
+      "host": "127.0.0.1",
+      "port": 9199
+    },
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5001
+    },
+    "ui": {
+      "enabled": false
+    }
+  }
+}

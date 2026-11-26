@@ -149,30 +149,59 @@ jobs:
       - name: Prepare Firebase configuration
         id: firebase_config
         env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -f "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON_B64:-}" ]; then
+          mkdir -p app
+          if [ ! -s "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            echo "Restoring app/google-services.json from GOOGLE_SERVICES_JSON secret..."
+            printf '%s' "$GOOGLE_SERVICES_JSON" > "app/google-services.json"
+          fi
+          if [ ! -s "app/google-services.json" ] && [ -n "${GOOGLE_SERVICES_JSON_B64:-}" ]; then
             echo "Decoding app/google-services.json from GOOGLE_SERVICES_JSON_B64 secret..."
             if ! printf '%s' "$GOOGLE_SERVICES_JSON_B64" | tr -d '\r\n ' | base64 -d > "app/google-services.json"; then
               rm -f "app/google-services.json"
             fi
           fi
-          if [ ! -f "app/google-services.json" ] || [ ! -s "app/google-services.json" ]; then
-            echo "::warning::app/google-services.json is missing. The APK will compile safely, but Firebase Auth/Firestore/AI will require app/google-services.json to be added."
-          else
-            echo "Verified app/google-services.json is present."
+          if [ ! -s "app/google-services.json" ]; then
+            echo "ERROR: app/google-services.json is missing. Add app/google-services.json to the repository or set the GOOGLE_SERVICES_JSON (or GOOGLE_SERVICES_JSON_B64) repository secret."
+            exit 1
           fi
+          python3 - <<'PY'
+          import json, sys
+          with open("app/google-services.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          project_id = data.get("project_info", {}).get("project_id", "")
+          clients = data.get("client", [])
+          matched = False
+          has_web_client = False
+          for c in clients:
+              ci = c.get("client_info", {})
+              pkg = ci.get("android_client_info", {}).get("package_name", "")
+              app_id = ci.get("mobilesdk_app_id", "")
+              if pkg == "com.aistudio.aimusic.wltv.jqr8x" and app_id == "1:1035836705469:android:cd043a7cec9572aba505d4":
+                  matched = True
+              for oc in c.get("oauth_client", []):
+                  if oc.get("client_type") == 3:
+                      has_web_client = True
+          if project_id != "gen-lang-client-0518223416" or not matched or not has_web_client:
+              print("ERROR: app/google-services.json does not match expected project, package, or OAuth configuration.", file=sys.stderr)
+              sys.exit(1)
+          print(f"Verified app/google-services.json for project={project_id}, package=com.aistudio.aimusic.wltv.jqr8x, webOAuth={has_web_client}")
+          PY
 
       - name: Build debug APK
         id: build_apk
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf app/build/outputs/apk app/build/generated/res/processDebugGoogleServices
           GRADLE_OPTS="-Xmx3g -Dfile.encoding=UTF-8" \
-          gradle :app:assembleDebug \
+          gradle :app:clean :app:assembleDebug \
             -Dorg.gradle.jvmargs="-Xmx3g -Dfile.encoding=UTF-8" \
+            --no-build-cache \
             --max-workers=2 \
             --stacktrace \
             --no-daemon 2>&1 | tee build-apk.log
@@ -184,7 +213,7 @@ jobs:
           name: build-apk-log
           path: build-apk.log
 
-      - name: Verify debug APK
+      - name: Verify debug APK and packaged Firebase resources
         id: verify_apk
         shell: bash
         run: |
@@ -202,6 +231,36 @@ jobs:
           fi
           APK_SIZE=$(wc -c < "$APK_PATH")
           echo "Verified debug APK at $APK_PATH (${APK_SIZE} bytes)."
+
+          GS_XML=$(find app/build/generated/res/processDebugGoogleServices -name "values.xml" | head -n 1 || true)
+          if [ -z "$GS_XML" ] || [ ! -s "$GS_XML" ]; then
+            echo "ERROR: processDebugGoogleServices did not generate values.xml."
+            exit 1
+          fi
+          for res_key in google_app_id default_web_client_id gcm_defaultSenderId project_id; do
+            if ! grep -q "name=\"${res_key}\"" "$GS_XML"; then
+              echo "ERROR: Generated Google Services resource missing key: ${res_key}"
+              exit 1
+            fi
+          done
+          echo "Verified Google Services generated XML contains required resource keys."
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          AAPT2_BIN=$(find "${SDK_ROOT}/build-tools" -type f -name "aapt2" 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$AAPT2_BIN" ]; then
+            echo "ERROR: aapt2 not found under ${SDK_ROOT}/build-tools to inspect packaged APK resources."
+            exit 1
+          fi
+          "$AAPT2_BIN" dump resources "$APK_PATH" > apk-resources.txt
+          for res_key in google_app_id default_web_client_id gcm_defaultSenderId project_id google_api_key firestore_database_id; do
+            if ! grep -q "string/${res_key}" apk-resources.txt; then
+              echo "ERROR: APK does not contain packaged resource string/${res_key}"
+              rm -f apk-resources.txt
+              exit 1
+            fi
+            echo "Verified packaged in APK: string/${res_key}=PASS"
+          done
+          rm -f apk-resources.txt
 
       - name: Upload debug APK artifact
         id: upload_artifact
@@ -284,6 +343,7 @@ jobs:
           SDK_OUTCOME="${{ steps.android_sdk.outcome }}"
           GRADLE_OUTCOME="${{ steps.setup_gradle.outcome }}"
           KEYSTORE_OUTCOME="${{ steps.keystore.outcome }}"
+          FIREBASE_OUTCOME="${{ steps.firebase_config.outcome }}"
           BUILD_OUTCOME="${{ steps.build_apk.outcome }}"
           VERIFY_OUTCOME="${{ steps.verify_apk.outcome }}"
           ARTIFACT_OUTCOME="${{ steps.upload_artifact.outcome }}"
@@ -308,7 +368,7 @@ jobs:
             echo "Release Title: ${RELEASE_TITLE}"
             echo "Release Page URL: ${RELEASE_URL}"
             echo "APK Filename: app-debug.apk"
-            echo "Download the APK from the release Assets section. Backup artifact: app-debug-apk."
+            echo "Firebase Packaged Verification: PASS"
             echo "DIRECT APK DOWNLOAD: ${DIRECT_URL}"
 
             {
@@ -318,6 +378,9 @@ jobs:
               echo "- **Direct APK Link:** ${DIRECT_URL}"
               echo "- **Release Tag:** \`${RELEASE_TAG}\`"
               echo "- **Release Title:** ${RELEASE_TITLE}"
+              echo "- **GitHub Run:** #${GITHUB_RUN_NUMBER} (attempt ${GITHUB_RUN_ATTEMPT})"
+              echo "- **Commit SHA:** \`${GITHUB_SHA}\`"
+              echo "- **Firebase Config Packaged in APK:** PASS"
               echo "- **APK Filename:** \`app-debug.apk\`"
               echo ""
               echo "You can download the APK from the release **Assets** section on the release page above. The normal Actions artifact (\`app-debug-apk\`) is also available as a backup."
@@ -330,14 +393,14 @@ jobs:
               echo ""
               echo "WARNING: GitHub Release publishing failed for tag \`${RELEASE_TAG}\`, so no release URL was published."
               echo ""
-              echo "The APK build succeeded, and the Actions artifact named \`app-debug-apk\` remains available as a backup."
+              echo "The APK build succeeded with verified Firebase resources, and the Actions artifact named \`app-debug-apk\` remains available as a backup."
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "WARNING: Debug APK build or verification failed (sdk=${SDK_OUTCOME}, gradle=${GRADLE_OUTCOME}, keystore=${KEYSTORE_OUTCOME}, build=${BUILD_OUTCOME}, verify=${VERIFY_OUTCOME}, artifact=${ARTIFACT_OUTCOME}). No release was published."
+            echo "WARNING: Debug APK build or verification failed (sdk=${SDK_OUTCOME}, gradle=${GRADLE_OUTCOME}, keystore=${KEYSTORE_OUTCOME}, firebase=${FIREBASE_OUTCOME}, build=${BUILD_OUTCOME}, verify=${VERIFY_OUTCOME}, artifact=${ARTIFACT_OUTCOME}). No release was published."
             {
               echo "## Debug APK Build Failed"
               echo ""
-              echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
+              echo "Step outcomes: \`sdk=${SDK_OUTCOME}\`, \`gradle=${GRADLE_OUTCOME}\`, \`keystore=${KEYSTORE_OUTCOME}\`, \`firebase=${FIREBASE_OUTCOME}\`, \`build=${BUILD_OUTCOME}\`, \`verify=${VERIFY_OUTCOME}\`, \`artifact=${ARTIFACT_OUTCOME}\`."
               echo ""
               if [ -f "build-apk.log" ]; then
                 echo "### Compiler / Build Error Lines"
